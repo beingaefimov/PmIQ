@@ -1,0 +1,21 @@
+{
+  "mcpServers": {
+    "pm-resource-server": {
+      "command": "npx",
+      "args": ["-y", "@pm-iq/resource-mcp-server", "start"],
+      "tools": [
+        "get_resource_histogram",
+        "get_procurement_status",
+        "get_contractor_performance",
+        "get_equipment_availability",
+        "get_material_delivery_schedule"
+      ],
+      "env": {
+        "WORKDAY_API_ENDPOINT": "${WORKDAY_API_ENDPOINT}",
+        "WORKDAY_REFRESH_TOKEN": "${WORKDAY_REFRESH_TOKEN}",
+        "SAP_MM_API_URL": "${SAP_MM_API_URL}",
+        "SAP_MM_API_KEY": "${SAP_MM_API_KEY}"
+      }
+    }
+  }
+}
