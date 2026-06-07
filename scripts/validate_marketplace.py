@@ -1,5 +1,10 @@
 """ Валидатор структуры маркетплейса PM IQ.
-Проверяет целостность marketplace.json, плагинов, скиллов и MCP-конфигурации """
+Проверяет целостность marketplace.json, плагинов, скиллов и MCP-конфигурации.
+
+pip install pyyaml
+python scripts/validate_marketplace.py
+
+Если скрипт вернул exit code 0 — всё хорошо, можно коммитить. Если 1 — нужно исправить ошибки """
 
 import json
 import os
