@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "pm-risk-server": {
+      "command": "npx",
+      "args": ["-y", "@pm-iq/risk-mcp-server", "start"],
+      "tools": [
+        "get_risk_register",
+        "get_change_request_status",
+        "get_issue_log",
+        "simulate_risk_impact",
+        "calculate_contingency_reserve"
+      ],
+      "env": {
+        "SERVICENOW_INSTANCE_URL": "${SERVICENOW_INSTANCE_URL}",
+        "SERVICENOW_API_KEY": "${SERVICENOW_API_KEY}",
+        "RISK_DB_CONNECTION_STRING": "${RISK_DB_CONNECTION_STRING}"
+      }
+    }
+  }
+}
