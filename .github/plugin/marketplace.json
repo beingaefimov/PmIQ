@@ -1,0 +1,75 @@
+{
+  "name": "pm-iq",
+  "metadata": {
+    "version": "1.0.0",
+    "description": "The PM IQ plugin collection for project management aligned with PMBOK 8"
+  },
+  "owner": {
+    "name": "Your Organization"
+  },
+  "plugins": [
+    {
+      "name": "pm-project-core",
+      "source": "./plugins/pm-project-core",
+      "version": "1.0.0",
+      "description": "Core project artifacts, schedules, WBS, and milestones for predictive, adaptive, and hybrid methodologies.",
+      "skills": [
+        "./plugins/pm-project-core/skills/pm-schedule-tracker"
+      ]
+    },
+    {
+      "name": "pm-value-and-performance",
+      "source": "./plugins/pm-value-and-performance",
+      "version": "1.0.0",
+      "description": "Value delivery, EVM (Earned Value Management), KPIs, and OKR alignment for measuring project performance.",
+      "skills": [
+        "./plugins/pm-value-and-performance/skills/evm-and-value-analyzer"
+      ]
+    },
+    {
+      "name": "pm-risk-and-change",
+      "source": "./plugins/pm-risk-and-change",
+      "version": "1.0.0",
+      "description": "Formal risk registers, change control (CCB), issue tracking, and contingency reserve management.",
+      "skills": [
+        "./plugins/pm-risk-and-change/skills/risk-and-change-controller"
+      ]
+    },
+    {
+      "name": "pm-resource-and-procurement",
+      "source": "./plugins/pm-resource-and-procurement",
+      "version": "1.0.0",
+      "description": "Resource allocation, procurement tracking, contractor performance, and material delivery schedules.",
+      "skills": [
+        "./plugins/pm-resource-and-procurement/skills/resource-and-procurement-tracker"
+      ]
+    },
+    {
+      "name": "pm-quality-and-deliverables",
+      "source": "./plugins/pm-quality-and-deliverables",
+      "version": "1.0.0",
+      "description": "Quality management, deliverable acceptance, inspection results, and non-conformance reports (NCR).",
+      "skills": [
+        "./plugins/pm-quality-and-deliverables/skills/quality-and-acceptance-manager"
+      ]
+    },
+    {
+      "name": "pm-agent-toolkit",
+      "source": "./plugins/pm-agent-toolkit",
+      "version": "1.0.0",
+      "description": "Toolkit for PMO analysts to build custom declarative agents, dashboard widgets, and tailor PM processes to project complexity.",
+      "skills": [
+        "./plugins/pm-agent-toolkit/skills/pm-process-tailoring"
+      ]
+    },
+    {
+      "name": "pm-stakeholder-and-team",
+      "source": "./plugins/pm-stakeholder-and-team",
+      "version": "1.0.0",
+      "description": "Stakeholder engagement analysis, communication patterns, team health monitoring, and meeting effectiveness.",
+      "skills": [
+        "./plugins/pm-stakeholder-and-team/skills/stakeholder-engagement-analyzer"
+      ]
+    }
+  ]
+}
