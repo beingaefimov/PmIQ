@@ -1,0 +1,21 @@
+{
+  "mcpServers": {
+    "pm-quality-server": {
+      "command": "npx",
+      "args": ["-y", "@pm-iq/quality-mcp-server", "start"],
+      "tools": [
+        "get_deliverable_status",
+        "get_defect_log",
+        "get_inspection_results",
+        "get_ncr_status",
+        "calculate_quality_costs"
+      ],
+      "env": {
+        "QMS_API_URL": "${QMS_API_URL}",
+        "QMS_API_TOKEN": "${QMS_API_TOKEN}",
+        "PLM_SYSTEM_ENDPOINT": "${PLM_SYSTEM_ENDPOINT}",
+        "PLM_API_KEY": "${PLM_API_KEY}"
+      }
+    }
+  }
+}
