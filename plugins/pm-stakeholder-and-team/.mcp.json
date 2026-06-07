@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "pm-stakeholder-server": {
+      "command": "npx",
+      "args": ["-y", "@pm-iq/stakeholder-mcp-server", "start"],
+      "tools": [
+        "get_stakeholder_register",
+        "analyze_communication_patterns",
+        "get_meeting_decisions",
+        "get_feedback_summary"
+      ],
+      "env": {
+        "GRAPH_API_TENANT_ID": "${GRAPH_API_TENANT_ID}",
+        "GRAPH_API_CLIENT_ID": "${GRAPH_API_CLIENT_ID}",
+        "GRAPH_API_CLIENT_SECRET": "${GRAPH_API_CLIENT_SECRET}",
+        "SURVEY_PLATFORM_API_KEY": "${SURVEY_PLATFORM_API_KEY}"
+      }
+    }
+  }
+}
