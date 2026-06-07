@@ -1,6 +1,8 @@
 # PM IQ (Universal Edition)
 
-PM IQ is a слой сервисов и данных for Project Managers, PMO, and Program Directors across **all industries** (construction, manufacturing, engineering, IT, R&D, etc.). It provides MCP servers, skills, and tools that connect AI assistants to enterprise Project Management systems, aligned with **PMBOK Guide 8th Edition** principles and supporting **predictive (waterfall), adaptive (agile), and hybrid** approaches.
+PM IQ is a слой сервисов и данных for Project Managers, PMO, and Program Directors across **all industries** (construction, manufacturing, engineering, IT, R&D, etc.). It provides MCP servers, skills, and tools that connect AI assistants to enterprise Project Management systems, aligned with **PMBOK Guide 8th Edition** principles (акцент на принципах и доменах производительности) and supporting **predictive (waterfall), adaptive (agile), and hybrid** approaches.
+
+Здесь пытаемся сместить фокус с «извлечение данных» на доставку ценности (Value Delivery), системное мышление (Systems Thinking), адаптацию (Tailoring) и управление неопределенностью.
 
 ## Repository Structure
 
