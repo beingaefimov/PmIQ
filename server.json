@@ -1,0 +1,28 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.pm-iq/universal",
+  "title": "PM IQ Universal",
+  "description": "Query project management systems (Jira, MS Project, Primavera, SAP, ServiceNow) for schedules, resources, risks, quality, and deliverables aligned with PMBOK 8.",
+  "repository": {
+    "url": "https://github.com/your-org/pm-iq-mcp",
+    "source": "github"
+  },
+  "version": "1.0.0",
+  "websiteUrl": "https://github.com/my_org/pm-iq-mcp",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@pm-iq/universal",
+      "version": "1.0.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "value": "start",
+          "type": "positional"
+        }
+      ]
+    }
+  ]
+}
