@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "pm-toolkit-server": {
+      "command": "node",
+      "args": ["${PLUGIN_DIR}/dist/index.js", "start"],
+      "tools": [
+        "scaffold_declarative_agent",
+        "generate_widget_schema",
+        "assess_project_complexity"
+      ],
+      "env": {
+        "COMPANY_WIKI_API_URL": "${COMPANY_WIKI_API_URL}",
+        "COMPANY_WIKI_TOKEN": "${COMPANY_WIKI_TOKEN}",
+        "OPENAI_APPS_SDK_VERSION": "latest"
+      }
+    }
+  }
+}
