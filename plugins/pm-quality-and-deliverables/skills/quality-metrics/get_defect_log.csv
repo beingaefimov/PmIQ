@@ -1,0 +1,4 @@
+project_name,defect_id,severity,status,raised_date,component,source_system
+ERP_Migration,D-001,High,Open,2024-06-05,Migration Module,QMS
+ERP_Migration,D-002,Medium,In Progress,2024-06-07,API Integration,QMS
+Mobile_App_Dev,D-003,Low,Closed,2024-05-20,UI Frontend,QMS

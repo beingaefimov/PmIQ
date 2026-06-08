@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "pm-resource-server": {
-      "command": "npx",
-      "args": ["-y", "@pm-iq/resource-mcp-server", "start"],
+      "command": "python3",
+      "args": ["../servers/unified_mock_server.py", "--plugin", "pm-resource-and-procurement"],
       "tools": [
         "get_resource_histogram",
         "get_procurement_status",

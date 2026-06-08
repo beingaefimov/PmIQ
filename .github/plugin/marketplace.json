@@ -5,7 +5,7 @@
     "description": "The PM IQ plugin collection for project management aligned with PMBOK 8"
   },
   "owner": {
-    "name": "mMy Organization"
+    "name": "My Organization"
   },
   "plugins": [
     {

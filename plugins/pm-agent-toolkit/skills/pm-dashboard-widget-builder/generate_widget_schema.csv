@@ -1,0 +1,4 @@
+widget_type,schema_version,supported_data_formats,source_system
+resource_histogram,1.2,"json, csv",OpenAI Apps SDK
+risk_heatmap,1.2,"json",OpenAI Apps SDK
+gantt_chart,2.0,"json, msproject_xml",OpenAI Apps SDK

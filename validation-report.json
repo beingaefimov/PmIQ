@@ -1,0 +1,10 @@
+{
+  "status": "success",
+  "stats": {
+    "plugins_checked": 7,
+    "skills_checked": 24,
+    "mcp_configs_checked": 7
+  },
+  "errors": [],
+  "warnings": []
+}

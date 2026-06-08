@@ -1,0 +1,4 @@
+team,resource_name,role,allocation_pct,status,source_system
+Development,Alexeev A.,Senior Dev,120,Overallocated,Workday
+Development,Borisov B.,Dev,80,Normal,Workday
+Construction,Brigade_1,Masons,110,Overallocated,Workday

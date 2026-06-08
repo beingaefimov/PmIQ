@@ -7,23 +7,28 @@ PM IQ is a слой сервисов и данных for Project Managers, PMO, 
 ## Repository Structure
 
 ```
-pm-iq/
+PmIQ/
 ├── .github/
-│   └── plugin/
-│       └── marketplace.json
-├── plugins/
-│   ├── pm-project-core/          # Core project artifacts & schedule (any methodology)
-│   ├── pm-value-and-performance/ # Value delivery, KPIs, EVM, OKR
-│   ├── pm-risk-and-change/       # Formal risk & change management
-│   ├── pm-resource-and-procurement/ # Resources, contracts, procurement
-│   ├── pm-quality-and-deliverables/ # Quality, acceptance, deliverables
-│   ├── pm-agent-toolkit/         # Toolkit for PMO analysts to build custom agents
-│   └── pm-stakeholder-and-team/  # Stakeholder engagement & team performance
-├── server.json
-├── ADMIN-INSTRUCTIONS.md
-├── CONTRIBUTING.md
-├── PLUGINS.md
-└── AGENTS.md
+│   ├── plugin/
+│   │   └── marketplace.json    # Реестр маркетплейса
+│   └── workflows/
+│       └── validate-marketplace.yml    # GitHub Actions для валидации структуры
+│
+├── plugins/    # Плагины. В каждом - MCP-конфигурация, документация README плагина, skills, мок-данные к инструментам
+│
+├── servers/    # Реализация MCP-серверов
+│   └── unified_mock_server.py  # Мок-сервер (эмулирует серверы с данными из --plugin)
+│
+├── samples/    # Примеры использования
+│   ├── pm_iq_agent.py  # Динамический агент на Python + llama.cpp
+│   ├── requirements.txt
+│   └── README.md   # Инструкция по запуску
+│
+├── scripts/    # Служебные скрипты
+│   └── validate_marketplace.py # Валидатор структуры маркетплейса
+│
+├── server.json # Манифест MCP-сервера (паспорт пакета)
+└── validation-report.json  # Отчёт валидатора (генерируется автоматически)
 ```
 
 ---

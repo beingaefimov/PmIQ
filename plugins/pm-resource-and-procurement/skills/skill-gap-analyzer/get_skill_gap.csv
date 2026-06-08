@@ -1,0 +1,4 @@
+project_name,required_skill,required_level,available_count,needed_count,gap_description,source_system
+ERP_Migration,SAP Migration,Expert,1,2,Shortage of 1 expert,Workday
+ERP_Migration,Cybersecurity,Expert,0,1,Missing cybersecurity expert,Workday
+Mobile_App_Dev,React Native,Advanced,3,2,No gap,Workday

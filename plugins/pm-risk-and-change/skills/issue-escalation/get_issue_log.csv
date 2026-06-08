@@ -1,0 +1,4 @@
+project_name,issue_id,description,severity,status,days_open,assigned_to,source_system
+ERP_Migration,I-001,Data migration error,Critical,Open,5,Dev Team,ServiceNow
+ERP_Migration,I-002,API incompatibility,High,In Progress,3,Integrator,ServiceNow
+Mobile_App_Dev,I-003,UI glitch on iOS,Low,Open,2,QA Team,Jira

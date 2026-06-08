@@ -1,0 +1,4 @@
+project_name,metric_name,current_value,baseline_value,trend,recommendation,source_system
+ERP_Migration,meetings_per_week,12,8,Increasing,Reduce recurring meetings, consolidate updates,MS Graph API
+ERP_Migration,cross_team_collaboration_score,0.72,0.85,Decreasing,Increase sync frequency between Dev and QA,MS Graph API
+Mobile_App_Dev,emails_per_day,45,50,Stable,Current communication load is optimal,MS Graph API

@@ -1,0 +1,4 @@
+contractor_name,project_name,kpi_score_pct,on_time_delivery_pct,quality_score_pct,open_issues_count,source_system
+Integrator_OOO,ERP_Migration,75,80,70,3,SAP MM
+StroyMat_LLC,Construction_Phase1,92,95,90,0,SAP MM
+CloudSec_Providers,Mobile_App_Dev,88,90,85,1,SAP MM

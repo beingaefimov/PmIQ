@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "pm-quality-server": {
-      "command": "npx",
-      "args": ["-y", "@pm-iq/quality-mcp-server", "start"],
+      "command": "python3",
+      "args": ["../servers/unified_mock_server.py", "--plugin", "pm-quality-and-deliverables"],
       "tools": [
         "get_deliverable_status",
         "get_defect_log",

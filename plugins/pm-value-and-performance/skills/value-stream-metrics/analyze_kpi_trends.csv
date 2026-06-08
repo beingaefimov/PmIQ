@@ -1,0 +1,4 @@
+project_name,metric_name,current_value,baseline_value,trend_percent,source_system
+Mobile_App_Dev,cycle_time_days,14.5,12.0,20.8,Jira + Power BI
+Mobile_App_Dev,throughput_per_week,12,15,-20.0,Jira + Power BI
+ERP_Migration,cycle_time_days,21.0,18.0,16.6,Jira + Power BI

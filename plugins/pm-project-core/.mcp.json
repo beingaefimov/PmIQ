@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "pm-core-server": {
-      "command": "npx",
-      "args": ["-y", "@pm-iq/core-mcp-server", "start"],
+      "command": "python3",
+      "args": ["../servers/unified_mock_server.py", "--plugin", "pm-project-core"],
       "tools": [
         "get_project_schedule",
         "get_wbs_structure",

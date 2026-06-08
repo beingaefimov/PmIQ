@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "pm-toolkit-server": {
-      "command": "node",
-      "args": ["${PLUGIN_DIR}/dist/index.js", "start"],
+      "command": "python3",
+      "args": ["../servers/unified_mock_server.py", "--plugin", "pm-agent-toolkit"],
       "tools": [
         "scaffold_declarative_agent",
         "generate_widget_schema",

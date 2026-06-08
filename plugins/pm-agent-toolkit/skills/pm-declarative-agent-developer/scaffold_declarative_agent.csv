@@ -1,0 +1,3 @@
+agent_type,template_name,required_capabilities,source_system
+Risk_Officer,risk_analyzer_v1,read_risk_register,generate_report,Internal Wiki
+Compliance_Checker,compliance_v2,read_documents,validate_rules,Internal Wiki

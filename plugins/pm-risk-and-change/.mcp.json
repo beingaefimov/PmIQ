@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "pm-risk-server": {
-      "command": "npx",
-      "args": ["-y", "@pm-iq/risk-mcp-server", "start"],
+      "command": "python3",
+      "args": ["../servers/unified_mock_server.py", "--plugin", "pm-risk-and-change"],
       "tools": [
         "get_risk_register",
         "get_change_request_status",

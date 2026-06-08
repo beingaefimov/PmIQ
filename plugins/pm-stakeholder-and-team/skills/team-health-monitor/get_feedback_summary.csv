@@ -1,0 +1,3 @@
+team_name,project_name,morale_score,burnout_indicators,collaboration_score,recommendation,source_system
+Development,Mobile_App_Dev,0.68,"2 members >50h/week, defect rate +25%",0.75,Conduct 1-on-1s, redistribute tasks,Survey Platform
+Construction,Construction_Phase1,0.85,None,0.80,Keep current pace,Survey Platform

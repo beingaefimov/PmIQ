@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "pm-stakeholder-server": {
-      "command": "npx",
-      "args": ["-y", "@pm-iq/stakeholder-mcp-server", "start"],
+      "command": "python3",
+      "args": ["../servers/unified_mock_server.py", "--plugin", "pm-stakeholder-and-team"],
       "tools": [
         "get_stakeholder_register",
         "analyze_communication_patterns",

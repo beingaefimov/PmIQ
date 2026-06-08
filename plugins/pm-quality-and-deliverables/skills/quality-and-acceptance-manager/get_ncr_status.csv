@@ -1,0 +1,4 @@
+ncr_id,project_name,description,severity,status,raised_date,cost_impact,source_system
+NCR-2024-001,Construction_Phase1,Wrong concrete grade used,Critical,Open,2024-06-05,500000,QMS
+NCR-2024-002,ERP_Migration,Data validation failure in module X,High,In Progress,2024-06-08,50000,QMS
+NCR-2024-003,Mobile_App_Dev,UI misalignment on small screens,Low,Closed,2024-05-20,0,QMS

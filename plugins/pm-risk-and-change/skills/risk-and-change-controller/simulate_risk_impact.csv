@@ -1,0 +1,4 @@
+risk_id,project_name,scenario,estimated_delay_days,estimated_cost_impact,probability_of_occurrence,source_system
+R-001,ERP_Migration,Primary supplier goes bankrupt,30,1500000,0.15,Risk DB
+R-002,ERP_Migration,Key architect resigns,14,200000,0.25,Risk DB
+R-003,Construction_Phase1,Extreme weather for 2 weeks,10,300000,0.40,Risk DB

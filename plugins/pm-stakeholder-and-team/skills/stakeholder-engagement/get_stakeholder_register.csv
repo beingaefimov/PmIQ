@@ -1,0 +1,4 @@
+project_name,stakeholder_name,role,current_engagement,desired_engagement,influence,source_system
+ERP_Migration,CEO,Sponsor,Supportive,Leading,High,MS Graph API
+ERP_Migration,CFO,Key Stakeholder,Neutral,Supportive,High,MS Graph API
+Mobile_App_Dev,Marketing Head,User,Resistant,Neutral,Medium,MS Graph API

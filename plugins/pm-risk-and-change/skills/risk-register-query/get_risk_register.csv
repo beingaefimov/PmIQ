@@ -1,0 +1,4 @@
+project_name,risk_id,description,probability,impact,status,owner,source_system
+ERP_Migration,R-001,Server delivery delay,High,High,Active,Ivanov I.I.,Risk DB
+ERP_Migration,R-002,Staff shortage,Medium,High,Active,Petrov P.P.,Risk DB
+Construction_Phase1,R-003,Weather conditions,High,Medium,Mitigated,Sidorov S.S.,Risk DB

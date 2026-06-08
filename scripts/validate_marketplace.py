@@ -4,7 +4,7 @@
 pip install pyyaml
 python scripts/validate_marketplace.py
 
-Если скрипт вернул exit code 0 — всё хорошо, можно коммитить. Если 1 — нужно исправить ошибки """
+Если скрипт вернул exit code 0 - всё хорошо, можно коммитить. Если 1 - нужно исправить ошибки """
 
 import json
 import os
@@ -36,17 +36,17 @@ class MarketplaceValidator:
 
     def error(self, msg: str) -> None:
         self.errors.append(msg)
-        print(f"❌ ERROR: {msg}", file=sys.stderr)
+        print(f"ERROR: {msg}", file=sys.stderr)
 
     def warn(self, msg: str) -> None:
         self.warnings.append(msg)
-        print(f"⚠️  WARNING: {msg}")
+        print(f"WARNING: {msg}")
 
     def info(self, msg: str) -> None:
-        print(f"ℹ️  {msg}")
+        print(f"{msg}")
 
     def validate(self) -> bool:
-        """Запускает все проверки. Возвращает True, если ошибок нет."""
+        """ Запускает все проверки. Возвращает True, если ошибок нет """
         print("=" * 60)
         print("PM IQ Marketplace Validator")
         print("=" * 60)
@@ -68,7 +68,7 @@ class MarketplaceValidator:
         return len(self.errors) == 0
 
     def _validate_marketplace_file(self) -> None:
-        """Проверяет marketplace.json и все указанные в нём плагины/скиллы."""
+        """ Проверяет marketplace.json и все указанные в нём плагины/скиллы """
         print("\n[1/3] Validating marketplace.json...")
 
         if not self.marketplace_file.exists():
@@ -96,7 +96,7 @@ class MarketplaceValidator:
             self._validate_plugin_entry(plugin)
 
     def _validate_plugin_entry(self, plugin: dict) -> None:
-        """Валидирует одну запись плагина из marketplace.json."""
+        """ Валидирует одну запись плагина из marketplace.json """
         name = plugin.get("name", "<unnamed>")
         self.info(f"Checking plugin: {name}")
 
@@ -120,7 +120,7 @@ class MarketplaceValidator:
         if not readme.exists():
             self.error(f"Plugin '{name}': missing README.md at {readme}")
 
-        # .mcp.json опционален, но если есть — проверяем
+        # .mcp.json опционален, но если есть - проверяем
         mcp_config = source_path / ".mcp.json"
         if mcp_config.exists():
             self.stats["mcp_configs_checked"] += 1
@@ -141,7 +141,7 @@ class MarketplaceValidator:
         self.stats["plugins_checked"] += 1
 
     def _validate_skill_entry(self, plugin_name: str, skill_path_str: str) -> None:
-        """Валидирует один скилл."""
+        """ Валидирует один скилл."""
         skill_path = self.repo_root / skill_path_str
         if not skill_path.exists():
             self.error(
@@ -217,7 +217,7 @@ class MarketplaceValidator:
         self.stats["skills_checked"] += 1
 
     def _validate_plugins_consistency(self) -> None:
-        """Обратная проверка: все папки в plugins/ должны быть в marketplace.json."""
+        """ Обратная проверка: все папки в plugins/ должны быть в marketplace.json """
         print("\n[2/3] Checking plugins consistency (reverse check)...")
 
         if not self.plugins_dir.exists():
@@ -254,7 +254,7 @@ class MarketplaceValidator:
             )
 
     def _validate_server_json(self) -> None:
-        """Проверяет корневой server.json."""
+        """ Проверяет корневой server.json """
         print("\n[3/3] Validating server.json...")
 
         server_file = self.repo_root / "server.json"
@@ -285,7 +285,7 @@ class MarketplaceValidator:
                 self.error(f"server.json: package #{i} missing 'transport'")
 
     def _save_report(self) -> None:
-        """Сохраняет отчёт о валидации в JSON."""
+        """ Сохраняет отчёт о валидации в JSON """
         report = {
             "status": "success" if not self.errors else "failed",
             "stats": self.stats,
@@ -304,10 +304,10 @@ def main() -> int:
     success = validator.validate()
 
     if success:
-        print("\n✅ Marketplace validation PASSED")
+        print("\nMarketplace validation PASSED")
         return 0
     else:
-        print(f"\n❌ Marketplace validation FAILED ({len(validator.errors)} errors)")
+        print(f"\nMarketplace validation FAILED ({len(validator.errors)} errors)")
         return 1
 
 

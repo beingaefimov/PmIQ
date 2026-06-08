@@ -1,0 +1,4 @@
+project_name,bac,pv,ev,ac,cpi,spi,status,source_system
+ERP_Migration,10000000,6500000,6000000,7000000,0.86,0.92,Over Budget,SAP FI/CO
+Construction_Phase1,50000000,20000000,18000000,19000000,0.95,0.90,Slightly Behind,SAP FI/CO
+Mobile_App_Dev,2000000,1500000,1600000,1400000,1.14,1.07,Ahead of Schedule,SAP FI/CO

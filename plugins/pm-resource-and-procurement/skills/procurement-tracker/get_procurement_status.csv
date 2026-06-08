@@ -1,0 +1,3 @@
+po_id,project_name,item,supplier,status,expected_delivery,delay_days,source_system
+PO-2024-001,ERP_Migration,Dell Servers,Dell Tech,In Transit,2024-06-15,0,SAP MM
+PO-2024-002,Construction_Phase1,Concrete M500,StroyMat,Delayed,2024-06-01,10,SAP MM
