@@ -39,7 +39,7 @@ wsl --shutdown
 Запуск llama.cpp server
 
 ```bash
-./llama-server -m models/llama-3-8b-instruct.gguf -c 14096 --port 8080
+./llama-server -m "models/llama-3-8b-instruct.gguf" -c 14096 --host 0.0.0.0 --port 8080
 ```
 
 *Убедитесь, что сервер отвечает на `http://localhost:8080/v1/models`.*
@@ -48,13 +48,15 @@ wsl --shutdown
 Рекомендуемая команда запуска для агентных задач:
 
 ```bash
-./llama-server -m models/ваша_модель.gguf \
-  --ctx-size 4096 \
-  --temp 0.1 \
-  --top-p 0.9 \
-  --repeat-penalty 1.15 \
-  --mirostat 2 \
-  --mirostat-lr 0.1 \
+./llama-server -m "models/ваша_модель.gguf" ^
+  --host 0.0.0.0 ^
+  --port 8080 ^
+  --ctx-size 14096 ^
+  --temp 0.1 ^
+  --top-p 0.9 ^
+  --repeat-penalty 1.15 ^
+  --mirostat 2 ^
+  --mirostat-lr 0.1 ^
   --mirostat-ent 5.0
 ```
 
@@ -79,6 +81,14 @@ pip install -r requirements.txt
 
 ```bash
 python3 pm_iq_agent.py
+```
+
+Длительная подготовка ответа моделью может свидетельствовать о происходящем рассуждении. По ввозможности (при пригодности результатов модели в таком случае) выключить рассуждение:
+
+```bash
+./llama-server ...
+  --reasoning-budget 0 ^
+  --chat-template-kwargs "{\"enable_thinking\":false}"
 ```
 
 ## Как это работает (Поток ReAct)
