@@ -10,9 +10,36 @@
 
 ### Запуск llama.cpp server
 
+Пробросить сеть Windows-WSL если используется WSL
+
+В PowerShell:
+
+```powershell
+notepad $env:USERPROFILE\.wslconfig
+```
+
+Добавить содержимое:
+
 ```bash
-# Пример для Linux/macOS
-./llama-server -m models/llama-3-8b-instruct.gguf -c 4096 --port 8080
+[wsl2]
+localhostForwarding=true
+networkingMode=mirrored
+```
+
+Сохранить файл.
+
+Перезапустить WSL:
+
+```powershell
+wsl --shutdown
+```
+
+Затем открыть WSL заново.
+
+Запуск llama.cpp server
+
+```bash
+./llama-server -m models/llama-3-8b-instruct.gguf -c 14096 --port 8080
 ```
 
 *Убедитесь, что сервер отвечает на `http://localhost:8080/v1/models`.*
@@ -51,7 +78,7 @@ pip install -r requirements.txt
 ### Запуск агента
 
 ```bash
-python pm_iq_agent.py
+python3 pm_iq_agent.py
 ```
 
 ## Как это работает (Поток ReAct)
