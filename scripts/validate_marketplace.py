@@ -1,8 +1,8 @@
 """ Валидатор структуры маркетплейса PM IQ.
 Проверяет целостность marketplace.json, плагинов, скиллов и MCP-конфигурации.
 
-python3 -m venv myenv
-source myenv/bin/activate
+python3 -m venv venv
+source venv/bin/activate
 pip install pyyaml
 python scripts/validate_marketplace.py
 
