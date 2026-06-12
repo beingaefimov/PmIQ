@@ -319,7 +319,7 @@ CRITICAL RULES:
    - Do NOT truncate, summarize, or simplify the widget JSON. The UI needs the full structure to render the chart.
    - To include a widget, output it EXACTLY as a ```json ... ``` code block with the updated title.
    - **MULTIPLE WIDGETS:** If the `widgets` array contains multiple items and the user's query covers multiple aspects, include ALL relevant widgets. For example, if the query asks about risks AND mitigation plans, include both the risk visualization widget AND the ActionCard widget.
-   - **ACTION CARDS:** If a widget has `widget_type: "action_card"`, it represents an interactive button for the user. ALWAYS include it if the user's query relates to the action it offers (e.g., creating a plan, escalating an issue). For ActionCards, also update the `title` field to be context-aware (e.g., "⚠️ Критический риск: задержка поставки серверов").
+   - **ACTION CARDS:** If a widget has `widget_type: "action_card"`, it represents an interactive button for the user. ALWAYS include it if the user's query relates to the action it offers (e.g., creating a plan, escalating an issue). For ActionCards, also update the `title` field to be context-aware (e.g., "Критический риск: задержка поставки оборудования").
    - If the user asked for a simple fact, you usually do NOT need widgets.
    - If the user asked for analysis, visualization, or comparison, widgets are RECOMMENDED.
 
