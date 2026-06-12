@@ -3,6 +3,11 @@ name: resource-allocation
 description: >
   Анализирует загрузку ресурсов, выявляет перегрузки (overallocation) и конфликты расписания команды.
   Triggers: "загрузка ресурсов", "перегрузка команды", "overallocation", "распределение ресурсов", "resource histogram"
+available_widgets:
+  - type: BarChart
+    description: "Гистограмма загрузки по конкретным ресурсам. Используйте, если нужно выявить конкретных перегруженных сотрудников (allocation > 100%)."
+  - type: PieChart
+    description: "Распределение загрузки по ролям или статусам. Используйте для общего баланса команды."
 ---
 
 # Resource Allocation

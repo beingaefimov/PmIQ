@@ -4,7 +4,7 @@
 python3 -m venv venv
 source venv/bin/activate
 pip install pyyaml
-python scripts/validate_marketplace.py
+python validate_marketplace.py
 
 Если скрипт вернул exit code 0 - всё хорошо, можно коммитить. Если 1 - нужно исправить ошибки """
 

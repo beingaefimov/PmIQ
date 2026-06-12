@@ -16,3 +16,4 @@ samples/.claude/
 samples/.venv/
 samples/venv/
 samples/build
+samples/ui/js/*

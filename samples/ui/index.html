@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PM IQ Agent</title>
+    <script src="/static/js/echarts.min.js"></script>
+    <script src="/static/js/marked.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #0a0a0a;
+            color: #e0e0e0;
+            min-height: 100vh;
+            padding: 2rem;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 2rem;
+            color: #fff;
+            font-weight: 300;
+            letter-spacing: 2px;
+        }
+
+        /* Input Section */
+        .input-section {
+            background: #1a1a1a;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            border: 1px solid #2a2a2a;
+        }
+
+        .input-wrapper {
+            position: relative;
+        }
+
+        #questionInput {
+            width: 100%;
+            padding: 1rem;
+            background: #0a0a0a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            color: #e0e0e0;
+            font-size: 1rem;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+
+        #questionInput:focus {
+            border-color: #4a9eff;
+        }
+
+        .dropdown-toggle {
+            position: absolute;
+            right: 1rem;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            color: #888;
+            cursor: pointer;
+            font-size: 0.9rem;
+            flex: 1;
+            transition: transform 0.3s ease;
+        }
+
+        .dropdown-toggle.rotated {
+            transform: translateY(-50%) rotate(180deg);
+        }
+
+        .dropdown-menu {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            margin-top: 0.5rem;
+            max-height: 300px;
+            overflow-y: auto;
+            display: none;
+            z-index: 100;
+        }
+
+        .dropdown-menu.active {
+            display: block;
+        }
+
+        .dropdown-item {
+            padding: 0.75rem 1rem;
+            cursor: pointer;
+            border-bottom: 1px solid #2a2a2a;
+            transition: background 0.2s;
+        }
+
+        .dropdown-item:hover {
+            background: #2a2a2a;
+        }
+
+        .dropdown-item .category {
+            font-size: 0.75rem;
+            color: #4a9eff;
+            margin-bottom: 0.25rem;
+        }
+
+        .dropdown-item .text {
+            font-size: 0.9rem;
+            color: #ccc;
+        }
+
+        /* Progress Card раскрываемый */
+        .progress-card {
+            background: #1a1a1a;
+            border-radius: 12px;
+            margin-bottom: 1rem;
+            border: 1px solid #2a2a2a;
+            overflow: hidden;
+            transition: border-color 0.2s;
+        }
+
+        .progress-card:hover {
+            border-color: #4a9eff;
+        }
+
+        .progress-card.active {
+            display: block;
+        }
+
+        .progress-header {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 1rem 1.5rem;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .progress-header:hover {
+            background: #222;
+        }
+
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 3px solid #333;
+            border-top-color: #4a9eff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            flex-shrink: 0;
+        }
+
+        .spinner.done {
+            display: none;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .progress-text {
+            color: #888;
+            font-size: 0.9rem;
+            flex: 1;
+        }
+
+        .progress-toggle {
+            color: #666;
+            font-size: 0.85rem;
+            transition: transform 0.3s;
+        }
+
+        .progress-toggle.expanded {
+            transform: rotate(180deg);
+        }
+
+        /* Логи внутри карточки (раскрываемая область) */
+        .log-panel {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.4s ease-out;
+            background: #0a0a0a;
+            border-top: 1px solid #2a2a2a;
+        }
+
+        .log-panel.expanded {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .log-content {
+            padding: 1rem 1.5rem;
+            font-family: 'Courier New', monospace;
+            font-size: 0.8rem;
+            line-height: 1.5;
+            color: #888;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .log-content .log-line {
+            padding: 2px 0;
+            border-bottom: 1px solid #1a1a1a;
+        }
+
+        .log-content .log-line.new {
+            animation: fadeIn 0.3s;
+            color: #4a9eff;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; background: #1a2a4a; }
+            to { opacity: 1; background: transparent; }
+        }
+
+        /* Кастомный скроллбар */
+        .log-panel::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .log-panel::-webkit-scrollbar-track {
+            background: #0a0a0a;
+        }
+
+        .log-panel::-webkit-scrollbar-thumb {
+            background: #333;
+            border-radius: 4px;
+        }
+
+        .log-panel::-webkit-scrollbar-thumb:hover {
+            background: #444;
+        }
+
+        /* Charts Container */
+        .charts-container {
+            margin-top: 2rem;
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+        }
+
+        .chart-wrapper {
+            background: #0a0a0a;
+            border: 1px solid #2a2a2a;
+            border-radius: 8px;
+            padding: 1.5rem;
+            width: 100%;
+        }
+
+        .chart-title {
+            font-size: 1.1rem;
+            color: #fff;
+            margin-bottom: 1rem;
+            font-weight: 500;
+        }
+
+        .chart-container {
+            width: 100%;
+            height: 450px;
+            min-height: 400px;
+        }
+
+        /* JSON под катом */
+        .json-details {
+            margin-top: 1rem;
+            border-top: 1px solid #2a2a2a;
+            padding-top: 0.75rem;
+        }
+
+        .json-details summary {
+            cursor: pointer;
+            color: #666;
+            font-size: 0.85rem;
+            padding: 0.25rem 0;
+            user-select: none;
+        }
+
+        .json-details summary:hover {
+            color: #4a9eff;
+        }
+
+        .json-details pre {
+            background: #050505;
+            padding: 1rem;
+            border-radius: 6px;
+            overflow-x: auto;
+            margin-top: 0.5rem;
+            font-size: 0.75rem;
+            line-height: 1.4;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        /* Response Card */
+        .response-card {
+            background: #1a1a1a;
+            border-radius: 12px;
+            padding: 2rem;
+            border: 1px solid #2a2a2a;
+            display: none;
+        }
+
+        .response-card.active {
+            display: block;
+        }
+
+        .response-content {
+            line-height: 1.8;
+            color: #e0e0e0;
+        }
+
+        .response-content h1,
+        .response-content h2,
+        .response-content h3 {
+            color: #fff;
+            margin: 1.5rem 0 1rem;
+        }
+
+        .response-content h3 {
+            font-size: 1.2rem;
+        }
+
+        .response-content p {
+            margin-bottom: 1rem;
+        }
+
+        .response-content ul,
+        .response-content ol {
+            margin-left: 2rem;
+            margin-bottom: 1rem;
+        }
+
+        .response-content li {
+            margin-bottom: 0.5rem;
+        }
+
+        .response-content code {
+            background: #0a0a0a;
+            padding: 0.2rem 0.4rem;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+
+        .response-content pre {
+            background: #0a0a0a;
+            padding: 1rem;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 1rem 0;
+        }
+
+        .response-content pre code {
+            background: none;
+            padding: 0;
+        }
+
+        .response-content table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1rem 0;
+        }
+
+        .response-content th,
+        .response-content td {
+            border: 1px solid #333;
+            padding: 0.75rem;
+            text-align: left;
+        }
+
+        .response-content th {
+            background: #0a0a0a;
+            font-weight: 600;
+        }
+
+        .response-content tr:hover {
+            background: #2a2a2a;
+        }
+
+        /* Action Card */
+        .action-card {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            border: 1px solid #4a9eff;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-top: 1rem;
+        }
+
+        .action-card-title {
+            font-size: 1.1rem;
+            color: #fff;
+            margin-bottom: 0.5rem;
+        }
+
+        .action-card-message {
+            color: #aaa;
+            margin-bottom: 1rem;
+        }
+
+        .action-button {
+            background: #4a9eff;
+            color: #fff;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.95rem;
+            transition: background 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .action-button:hover {
+            background: #3a8eef;
+        }
+
+        /* Empty state */
+        .empty-state {
+            text-align: center;
+            padding: 4rem 2rem;
+            color: #666;
+        }
+
+        .empty-state-icon {
+            font-size: 4rem;
+            margin-bottom: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>PM IQ Agent</h1>
+
+        <!-- Input Section -->
+        <div class="input-section">
+            <div class="input-wrapper">
+                <input type="text" id="questionInput" placeholder="Введите ваш вопрос или выберите из списка...">
+                <button class="dropdown-toggle" id="dropdownToggle">▼</button>
+                <div class="dropdown-menu" id="dropdownMenu"></div>
+            </div>
+        </div>
+
+        <!-- Progress Card раскрываемый -->
+        <div class="progress-card" id="progressCard" style="display: none;">
+            <div class="progress-header" id="progressHeader">
+                <div class="spinner" id="spinner"></div>
+                <div class="progress-text" id="progressText">Обрабатываю запрос...</div>
+                <div class="progress-toggle" id="progressToggle">▼</div>
+            </div>
+            <div class="log-panel" id="logPanel">
+                <div class="log-content" id="logContent"></div>
+            </div>
+        </div>
+
+        <!-- Response Card -->
+        <div class="response-card" id="responseCard">
+            <div class="response-content" id="responseContent"></div>
+            <div class="charts-container" id="chartsContainer"></div>
+        </div>
+    </div>
+
+    <script>
+        let currentSessionId = null;
+        let ws = null;
+        let charts = [];
+        let logsExpanded = false;
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadPredefinedQuestions();
+            setupEventListeners();
+        });
+
+        async function loadPredefinedQuestions() {
+            try {
+                const response = await fetch('/api/questions');
+                const questions = await response.json();
+                const dropdown = document.getElementById('dropdownMenu');
+                dropdown.innerHTML = questions.map(q => `
+                    <div class="dropdown-item" data-question="${escapeHtml(q.text)}">
+                        <div class="category">${escapeHtml(q.category)}</div>
+                        <div class="text">${escapeHtml(q.text)}</div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Failed to load questions:', error);
+            }
+        }
+
+        function setupEventListeners() {
+            const input = document.getElementById('questionInput');
+            const toggle = document.getElementById('dropdownToggle');
+            const menu = document.getElementById('dropdownMenu');
+            const progressHeader = document.getElementById('progressHeader');
+
+            toggle.addEventListener('click', (e) => {
+                e.stopPropagation();
+                menu.classList.toggle('active');
+                toggle.classList.toggle('rotated');
+            });
+
+            document.addEventListener('click', () => {
+                menu.classList.remove('active');
+                toggle.classList.remove('rotated');
+            });
+
+            menu.addEventListener('click', (e) => {
+                const item = e.target.closest('.dropdown-item');
+                if (item) {
+                    input.value = item.dataset.question;
+                    menu.classList.remove('active');
+                    toggle.classList.remove('rotated');
+                    submitQuestion();
+                }
+            });
+
+            input.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    submitQuestion();
+                    menu.classList.remove('active');
+                    toggle.classList.remove('rotated');
+                }
+            });
+
+            progressHeader.addEventListener('click', toggleLogs);
+        }
+
+        function toggleLogs() {
+            logsExpanded = !logsExpanded;
+            const panel = document.getElementById('logPanel');
+            const toggle = document.getElementById('progressToggle');
+            
+            if (logsExpanded) {
+                panel.classList.add('expanded');
+                toggle.classList.add('expanded');
+                // Автопрокрутка вниз
+                setTimeout(() => {
+                    panel.scrollTop = panel.scrollHeight;
+                }, 100);
+            } else {
+                panel.classList.remove('expanded');
+                toggle.classList.remove('expanded');
+            }
+        }
+
+        async function submitQuestion() {
+            const input = document.getElementById('questionInput');
+            const query = input.value.trim();
+            if (!query) return;
+
+            // Сброс UI
+            document.getElementById('responseCard').classList.remove('active');
+            document.getElementById('progressCard').style.display = 'block';
+            document.getElementById('logContent').innerHTML = '';
+            document.getElementById('progressText').textContent = 'Обрабатываю запрос...';
+            document.getElementById('spinner').classList.remove('done');
+            logsExpanded = false;
+            document.getElementById('logPanel').classList.remove('expanded');
+            document.getElementById('progressToggle').classList.remove('expanded');
+            clearCharts();
+
+            try {
+                const response = await fetch('/api/ask', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query })
+                });
+                const data = await response.json();
+                currentSessionId = data.session_id;
+                connectSSE(currentSessionId);
+            } catch (error) {
+                console.error('Failed to submit question:', error);
+                alert('Ошибка при отправке вопроса');
+            }
+        }
+
+        function connectSSE(sessionId) {
+            const eventSource = new EventSource(`/stream/${sessionId}`);
+            
+            eventSource.onmessage = (event) => {
+                const message = JSON.parse(event.data);
+                
+                if (message.type === 'log') {
+                    appendLogs([message.data]);
+                } else if (message.type === 'result') {
+                    onResult(message.data);
+                    eventSource.close();
+                } else if (message.type === 'error') {
+                    onError(message.data);
+                    eventSource.close();
+                }
+            };
+            
+            eventSource.onerror = (error) => {
+                console.error('SSE error:', error);
+                eventSource.close();
+            };
+        }
+
+        function appendLogs(newLogs) {
+            const logContent = document.getElementById('logContent');
+            newLogs.forEach(line => {
+                const div = document.createElement('div');
+                div.className = 'log-line new';
+                div.textContent = line;
+                logContent.appendChild(div);
+                // Убираем анимацию через некоторое время
+                setTimeout(() => div.classList.remove('new'), 500);
+            });
+            
+            // Автопрокрутка, если логи развёрнуты
+            if (logsExpanded) {
+                const panel = document.getElementById('logPanel');
+                panel.scrollTop = panel.scrollHeight;
+            }
+        }
+
+        function onResult(data) {
+            document.getElementById('spinner').classList.add('done');
+            document.getElementById('progressText').textContent = '✅ Ответ готов';
+            displayResult(data);
+        }
+
+        function onError(error) {
+            document.getElementById('progressCard').style.display = 'none';
+            alert('Ошибка: ' + error);
+        }
+
+        function displayResult(data) {
+            const responseCard = document.getElementById('responseCard');
+            const responseContent = document.getElementById('responseContent');
+            const chartsContainer = document.getElementById('chartsContainer');
+
+            // Markdown
+            responseContent.innerHTML = marked.parse(data.answer);
+
+            // Диаграммы
+            chartsContainer.innerHTML = '';
+            clearCharts();
+
+            if (data.widgets && data.widgets.length > 0) {
+                data.widgets.forEach((widget, index) => {
+                    if (widget.chart_type === 'ActionCard') {
+                        renderActionCard(widget, chartsContainer);
+                    } else if (widget.widget_type === 'echarts') {
+                        renderECharts(widget, chartsContainer, index);
+                    }
+                });
+            }
+
+            responseCard.classList.add('active');
+
+            // Передёргиваем окно, чтобы ECharts пересчитал размеры.
+            // Ждём 2 кадра анимации, чтобы браузер гарантированно завершил layout (reflow)
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    // Принудительно вызываем resize у всех созданных графиков
+                    charts.forEach(chart => chart.resize());
+                    // И на всякий случай dispatch-им глобальное событие resize окна
+                    window.dispatchEvent(new Event('resize'));
+                });
+            });
+        }
+
+        function renderECharts(widget, container, index) {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'chart-wrapper';
+            
+            const title = document.createElement('div');
+            title.className = 'chart-title';
+            title.textContent = widget.title || 'Диаграмма';
+            
+            const chartDiv = document.createElement('div');
+            chartDiv.className = 'chart-container';
+            chartDiv.id = `chart-${Date.now()}-${index}`;
+            
+            // JSON под диаграммой
+            const details = document.createElement('details');
+            details.className = 'json-details';
+            const summary = document.createElement('summary');
+            summary.textContent = 'Показать исходный JSON';
+            const pre = document.createElement('pre');
+            pre.textContent = JSON.stringify(widget, null, 2);
+            details.appendChild(summary);
+            details.appendChild(pre);
+            
+            wrapper.appendChild(title);
+            wrapper.appendChild(chartDiv);
+            wrapper.appendChild(details);
+            container.appendChild(wrapper);
+
+            // Инициализируем ECharts (берём option как есть, без модификаций)
+            const chart = echarts.init(chartDiv, 'dark', { renderer: 'canvas' });
+            chart.setOption(widget.option, true);
+            
+            // Сохраняем ссылку на инстанс
+            charts.push(chart);
+        }
+
+        function renderActionCard(widget, container) {
+            const card = document.createElement('div');
+            card.className = 'action-card';
+            
+            const buttonPayload = JSON.stringify(widget.button?.payload || {});
+            card.innerHTML = `
+                <div class="action-card-title">${escapeHtml(widget.title || 'Action Required')}</div>
+                <div class="action-card-message">${escapeHtml(widget.message || '')}</div>
+                <button class="action-button">
+                    ${escapeHtml(widget.button?.text || 'Take Action')}
+                </button>
+            `;
+            
+            card.querySelector('.action-button').addEventListener('click', () => {
+                handleAction(widget.button?.action, widget.button?.payload);
+            });
+            
+            container.appendChild(card);
+        }
+
+        function handleAction(action, payload) {
+            alert(`Action: ${action}\nPayload: ${JSON.stringify(payload, null, 2)}\n\n(Демонстрация. Реальное действие реализовать в бэкенде)`);
+        }
+
+        function clearCharts() {
+            charts.forEach(chart => chart.dispose());
+            charts = [];
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>
