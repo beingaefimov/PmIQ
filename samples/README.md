@@ -75,6 +75,7 @@ cd ~/PmIQ/samples
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+mkdir ui/js
 cd ui/js
 curl -O https://cdn.jsdelivr.net/npm/echarts@6.1.0/dist/echarts.min.js
 curl -O https://cdn.jsdelivr.net/npm/marked/marked.min.js
