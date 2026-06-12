@@ -85,7 +85,11 @@ curl -O https://cdn.jsdelivr.net/npm/marked/marked.min.js
 
 ```bash
 cd ~/PmIQ/samples
+# CLI
 python3 pm_iq_agent.py
+# Server with SSE log streaming
+python3 pm_iq_api.py
+http://localhost:8000
 ```
 
 Длительная подготовка ответа моделью может свидетельствовать о происходящем рассуждении. По ввозможности (при пригодности результатов модели в таком случае) выключить рассуждение:
