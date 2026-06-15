@@ -1,4 +1,4 @@
-project_name,status,start_date,end_date,completion_pct,critical_path_delay_days,source_system
-ERP_Migration,In Progress,2024-01-15,2024-12-31,65,5,Primavera P6
-Construction_Phase1,Delayed,2023-06-01,2025-08-30,40,14,MS Project
+project_name,status,start_date,end_date,completion_pct,critical_path_variance_days,source_system
+ERP_Migration,In Progress,2024-01-15,2024-12-31,65,-5,Primavera P6
+Construction_Phase1,Delayed,2023-06-01,2025-08-30,40,-14,MS Project
 Mobile_App_Dev,On Track,2024-03-01,2024-09-30,80,0,Jira

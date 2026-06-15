@@ -53,10 +53,12 @@
             font-size: 15px;
             line-height: 1.5;
             color: var(--text);
-            background:
+            background-color: var(--bg-page);
+            background-image:
                 radial-gradient(1200px 600px at 80% -10%, rgba(106, 211, 201, 0.06), transparent 60%),
-                radial-gradient(900px 500px at 0% 100%, rgba(80, 110, 180, 0.05), transparent 60%),
-                var(--bg-page);
+                radial-gradient(900px 500px at 0% 100%, rgba(80, 110, 180, 0.05), transparent 60%);
+            background-attachment: fixed;
+            background-repeat: no-repeat;
             min-height: 100vh;
             padding: 2.5rem 1.5rem 4rem;
             -webkit-font-smoothing: antialiased;
@@ -507,6 +509,28 @@
 
         .empty-state-icon { font-size: 3rem; margin-bottom: 0.75rem; }
 
+        .log-copy-btn {
+            display: none;
+            background: transparent;
+            border: none;
+            color: var(--text-dim);
+            font-size: 0.85rem;
+            cursor: pointer;
+            padding: 0.25rem 0.4rem;
+            border-radius: 4px;
+            transition: color 0.15s, background 0.15s;
+            margin-right: 0.3rem;
+        }
+        .log-copy-btn:hover {
+            color: var(--accent);
+            background: var(--bg-surface-2);
+        }
+        .log-copy-btn.visible {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
         @media (max-width: 640px) {
             body { padding: 1.25rem 1rem 3rem; }
             .page-header { flex-direction: column; align-items: flex-start; gap: 0.25rem; }
@@ -536,6 +560,7 @@
             <div class="progress-header" id="progressHeader">
                 <div class="spinner" id="spinner"></div>
                 <div class="progress-text" id="progressText">Обрабатываю запрос...</div>
+                <button class="log-copy-btn" id="logCopyBtn" title="Копировать логи" aria-label="Копировать логи">Копировать логи</button>
                 <div class="progress-toggle" id="progressToggle">▼</div>
             </div>
             <div class="log-panel" id="logPanel">
@@ -560,6 +585,20 @@
             loadPredefinedQuestions();
             setupEventListeners();
         });
+
+        async function copyLogsToClipboard() {
+            const lines = document.querySelectorAll('#logContent .log-line');
+            const text = Array.from(lines).map(l => l.textContent).join('\n');
+            try {
+                await navigator.clipboard.writeText(text);
+                const btn = document.getElementById('logCopyBtn');
+                const original = btn.textContent;
+                btn.textContent = '✓';
+                setTimeout(() => btn.textContent = original, 1200);
+            } catch (e) {
+                console.error('Copy failed', e);
+            }
+        }
 
         async function loadPredefinedQuestions() {
             try {
@@ -587,6 +626,11 @@
                 e.stopPropagation();
                 menu.classList.toggle('active');
                 toggle.classList.toggle('rotated');
+            });
+
+            document.getElementById('logCopyBtn').addEventListener('click', (e) => {
+                e.stopPropagation();
+                copyLogsToClipboard();
             });
 
             document.addEventListener('click', () => {
@@ -619,17 +663,17 @@
             logsExpanded = !logsExpanded;
             const panel = document.getElementById('logPanel');
             const toggle = document.getElementById('progressToggle');
+            const copyBtn = document.getElementById('logCopyBtn');
             
             if (logsExpanded) {
                 panel.classList.add('expanded');
                 toggle.classList.add('expanded');
-                // Автопрокрутка вниз
-                setTimeout(() => {
-                    panel.scrollTop = panel.scrollHeight;
-                }, 100);
+                copyBtn.classList.add('visible');
+                setTimeout(() => { panel.scrollTop = panel.scrollHeight; }, 100);
             } else {
                 panel.classList.remove('expanded');
                 toggle.classList.remove('expanded');
+                copyBtn.classList.remove('visible');
             }
         }
 

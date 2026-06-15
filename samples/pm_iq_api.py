@@ -1,4 +1,4 @@
-""" FastAPI wrapper for PM IQ Agent with SSE log streaming """
+""" FastAPI wrapper for Agent with SSE log streaming """
 
 import asyncio
 import json
@@ -7,16 +7,15 @@ import re
 import sys
 import uvicorn
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 # Импортируем агента
-import sys
 sys.path.insert(0, str(Path(__file__).parent))
 from pm_iq_agent import PmIqAgent
 
@@ -62,7 +61,10 @@ PREDEFINED_QUESTIONS = [
     PredefinedQuestion(id="3", category="Cross-domain", text="Как 5-дневная задержка в проекте 'Миграция ERP' повлияет на бюджет и какие есть связанные с этим риски?"),
     PredefinedQuestion(id="4", category="Schedule", text="Каков текущий статус критического пути по проекту 'Миграция ERP' и есть ли задержки?"),
     PredefinedQuestion(id="5", category="Budget", text="Покажи отклонение бюджета по всем проектам и выяви перерасход."),
-    PredefinedQuestion(id="6", category="Quality", text="Какие есть открытые несоответствия (NCR) и каков их статус?")]
+    PredefinedQuestion(id="6", category="Quality", text="Какие есть открытые несоответствия (NCR) и каков их статус?"),
+    PredefinedQuestion(id="7", category="Cross-domain", text="Ключевые выводы по EVM."),
+    PredefinedQuestion(id="8", category="Cross-domain", text="Прогноз итоговой стоимости (EAC) в трёх сценариях."),
+    PredefinedQuestion(id="9", category="Resources", text="У меня появилась новая задача на 20 часов. Кто из команды может взять её без перегрузки?")]
 
 @app.get("/", response_class=HTMLResponse)
 async def get_ui():

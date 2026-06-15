@@ -1,6 +1,6 @@
-project_name,wbs_id,wbs_name,status,parent_id,source_system
-ERP_Migration,1.0,Инициация,Completed,0,Primavera P6
-ERP_Migration,2.0,Планирование,Completed,0,Primavera P6
-ERP_Migration,3.0,Выполнение,In Progress,0,Primavera P6
-Construction_Phase1,1.0,Проектирование,Completed,0,MS Project
-Construction_Phase1,2.0,Фундамент,In Progress,0,MS Project
+project_name,wbs_id,wbs_name,status,parent_id,source_system,variance_days,completion_pct
+ERP_Migration,1.0,Инициация,Completed,0,Primavera P6,2,100
+ERP_Migration,2.0,Планирование,Completed,0,Primavera P6,1,100
+ERP_Migration,3.0,Выполнение,In Progress,0,Primavera P6,-8,65
+Construction_Phase1,1.0,Проектирование,Completed,0,MS Project,3,100
+Construction_Phase1,2.0,Фундамент,In Progress,0,MS Project,-12,40

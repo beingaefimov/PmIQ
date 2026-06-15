@@ -1,4 +1,4 @@
-project_name,milestone_name,target_date,status,source_system
-ERP_Migration,ТЗ утверждено,2024-02-01,Achieved,Primavera P6
-ERP_Migration,Миграция данных,2024-09-30,At Risk,Primavera P6
-Construction_Phase1,Сдача фундамента,2024-07-01,On Track,MS Project
+project_name,milestone_name,target_date,status,source_system,variance_days
+ERP_Migration,ТЗ утверждено,2024-02-01,Achieved,Primavera P6,3
+ERP_Migration,Миграция данных,2024-09-30,At Risk,Primavera P6,-12
+Construction_Phase1,Сдача фундамента,2024-07-01,On Track,MS Project,0

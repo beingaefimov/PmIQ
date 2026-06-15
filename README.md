@@ -132,7 +132,7 @@ PmIQ/
 
 **Bundles:**
 - `pm-declarative-agent-developer` skill — Scaffolding for creating specialized agents (e.g., "Compliance Checker", "Contract Manager", "Agile Coach", "Construction Supervisor").
-- `pm-dashboard-widget-builder` skill — Build MCP servers with custom UI widgets (Gantt charts, S-curves, histograms, heatmaps).
+- `pm-pc-builder` skill — Build custom applications.
 - `pm-process-tailoring` skill — Helps adapt PM processes to project complexity (predictive, adaptive, hybrid).
 
 ---

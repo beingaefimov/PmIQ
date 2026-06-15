@@ -73,7 +73,7 @@
       "skills": [
         "./plugins/pm-agent-toolkit/skills/pm-process-tailoring",
         "./plugins/pm-agent-toolkit/skills/pm-declarative-agent-developer",
-        "./plugins/pm-agent-toolkit/skills/pm-dashboard-widget-builder"
+        "./plugins/pm-agent-toolkit/skills/pm-pc-builder"
       ]
     },
     {

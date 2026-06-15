@@ -11,7 +11,7 @@
   "websiteUrl": "https://github.com/my_org/pm-iq-mcp",
   "packages": [
     {
-      "registryType": "npm",
+      "registryType": "pypi",
       "identifier": "@pm-iq/universal",
       "version": "1.0.0",
       "transport": {

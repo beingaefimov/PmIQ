@@ -1,4 +1,7 @@
-project_name,risk_id,description,probability,impact,status,owner,source_system
-ERP_Migration,R-001,Server delivery delay,High,High,Active,Ivanov I.I.,Risk DB
-ERP_Migration,R-002,Staff shortage,Medium,High,Active,Petrov P.P.,Risk DB
-Construction_Phase1,R-003,Weather conditions,High,Medium,Mitigated,Sidorov S.S.,Risk DB
+project_name,risk_id,description,probability,impact,probability_numeric,impact_numeric,risk_score,estimated_cost_impact,status,owner,source_system,period
+ERP_Migration,R-001,Server delivery delay,High,High,3,3,9,500000,Active,Ivanov I.I.,Risk DB,previous
+ERP_Migration,R-001,Server delivery delay,Medium,High,2,3,6,500000,Mitigated,Ivanov I.I.,Risk DB,current
+ERP_Migration,R-002,Staff shortage,Medium,Medium,2,2,4,300000,Active,Petrov P.P.,Risk DB,previous
+ERP_Migration,R-002,Staff shortage,High,High,3,3,9,300000,Active,Petrov P.P.,Risk DB,current
+Construction_Phase1,R-003,Weather conditions,High,Medium,3,2,6,150000,Active,Sidorov S.S.,Risk DB,previous
+Construction_Phase1,R-003,Weather conditions,Low,Low,1,1,1,150000,Closed,Sidorov S.S.,Risk DB,current

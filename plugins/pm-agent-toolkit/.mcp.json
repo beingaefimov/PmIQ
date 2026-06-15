@@ -5,7 +5,6 @@
       "args": ["../servers/unified_mock_server.py", "--plugin", "pm-agent-toolkit"],
       "tools": [
         "scaffold_declarative_agent",
-        "generate_widget_schema",
         "assess_project_complexity"
       ],
       "env": {
