@@ -683,6 +683,7 @@
             if (!query) return;
 
             // Сброс UI
+            document.getElementById('logCopyBtn').classList.remove('visible');
             document.getElementById('responseCard').classList.remove('active');
             document.getElementById('progressCard').style.display = 'block';
             document.getElementById('logContent').innerHTML = '';
