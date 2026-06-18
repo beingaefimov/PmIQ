@@ -1,5 +1,4 @@
-""" Детерминированный построитель ECharts-конфигурации из intent-дескрипторов.
-Вызывается в pm_iq_agent.py после того, как Python собрал дескриптор """
+""" Детерминированный построитель ECharts-конфигурации из intent-дескрипторов """
 
 from __future__ import annotations
 import math
@@ -14,6 +13,7 @@ PALETTE = {
     "gray":   "#aaaaaa",
     "purple": "#73c0de"}
 
+
 def render_widget(descriptor: dict[str, Any]) -> dict[str, Any] | None:
     """ Принимает intent-дескриптор, возвращает конверт совместимый с фронтендом """
     widget_type = descriptor.get("widget_type", "")
@@ -27,7 +27,7 @@ def render_widget(descriptor: dict[str, Any]) -> dict[str, Any] | None:
     builders = {
         "BarChart":    _build_bar_chart,
         "LineChart":   _build_line_chart,
-        "ScatterChart":_build_scatter_chart}
+        "ScatterChart": _build_scatter_chart}
     builder = builders.get(widget_type)
     if builder is None:
         return None
@@ -36,12 +36,11 @@ def render_widget(descriptor: dict[str, Any]) -> dict[str, Any] | None:
     except Exception as exc:
         option = _empty_option(f"{title} (ошибка рендеринга: {exc})")
     return {"widget_type": "echarts",
-        "chart_type": widget_type,
-        "intent": descriptor.get("intent", ""),
-        "title": title,
-        "option": option}
+            "chart_type": widget_type,
+            "intent": descriptor.get("intent", ""),
+            "title": title,
+            "option": option}
 
-# --- Action Card ---
 def _build_action_card(descriptor: dict[str, Any]) -> dict[str, Any] | None:
     title = descriptor.get("title", "")
     message = descriptor.get("message", "")
@@ -49,12 +48,11 @@ def _build_action_card(descriptor: dict[str, Any]) -> dict[str, Any] | None:
     if not message and not button:
         return None
     return {"widget_type": "action_card",
-        "chart_type": "ActionCard",
-        "title": title,
-        "message": message,
-        "button": button}
+            "chart_type": "ActionCard",
+            "title": title,
+            "message": message,
+            "button": button}
 
-# --- Bar Chart ---
 def _build_bar_chart(rows: list[dict], cfg: dict, title: str) -> dict[str, Any]:
     if cfg.get("chart_type") == "stacked_bar" and cfg.get("y_stack"):
         return _build_stacked_bar(rows, cfg, title)
@@ -75,7 +73,7 @@ def _build_bar_chart(rows: list[dict], cfg: dict, title: str) -> dict[str, Any]:
                 except ValueError:
                     pass
         return float(row.get(y_field, 0)) * y_scale
-    
+
     categories = [str(row.get(x_field, "")) for row in rows]
     values = [get_value(row) for row in rows]
     colors = [
@@ -133,7 +131,6 @@ def _build_stacked_bar(rows: list[dict], cfg: dict, title: str) -> dict[str, Any
         "yAxis": {"type": "value", "name": y_label},
         "series": series}
 
-# --- Line Chart ---
 def _build_line_chart(rows: list[dict], cfg: dict, title: str) -> dict[str, Any]:
     x_field = cfg.get("x", "")
     y_scale = float(cfg.get("y_scale", 1))
@@ -155,7 +152,7 @@ def _build_line_chart(rows: list[dict], cfg: dict, title: str) -> dict[str, Any]
                 try:
                     data.append(round(float(raw) * y_scale, 4))
                 except ValueError:
-                    data.append(None)   
+                    data.append(None)
         series_item: dict[str, Any] = {
             "name": label, "type": "line", "smooth": True, "connectNulls": False,
             "lineStyle": {"color": color, "type": line_type, "width": 2},
@@ -184,14 +181,15 @@ def _build_line_chart(rows: list[dict], cfg: dict, title: str) -> dict[str, Any]
             "inRange": {"color": [danger.get("color", "rgba(238,102,102,0.2)"), PALETTE["green"]]}}]
     return option
 
-# --- Scatter Chart ---
 def _to_numeric(val: Any) -> float:
-    if val is None: return 0.0
-    try: return float(val)
-    except (TypeError, ValueError): return 0.0
+    if val is None:
+        return 0.0
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return 0.0
 
 def _build_scatter_chart(rows: list[dict], cfg: dict, title: str) -> dict[str, Any]:
-    # Тренд (два периода) - отдельный builder
     if cfg.get("series_field") and cfg.get("series_values"):
         return _build_scatter_trend(rows, cfg, title)
     x_field = cfg.get("x", "")
@@ -208,13 +206,12 @@ def _build_scatter_chart(rows: list[dict], cfg: dict, title: str) -> dict[str, A
         y = _to_numeric(row.get(y_field))
         color_val = row.get(c_field) if c_field else x * y
         color = _resolve_color_by_value(color_val, thresholds)
-        # Размер точки: из поля или статичный
         symbol_size = 20
         if size_field and row.get(size_field):
             try:
                 symbol_size = max(15, min(60, math.sqrt(float(row[size_field]) / 50_000)))
             except (ValueError, TypeError):
-                pass   
+                pass
         scatter_data.append({
             "value": [x, y],
             "name": str(row.get(label_field, "")),
@@ -227,7 +224,8 @@ def _build_scatter_chart(rows: list[dict], cfg: dict, title: str) -> dict[str, A
         "grid": {"left": "10%", "right": "5%", "bottom": "10%", "containLabel": True},
         "xAxis": _build_value_axis(x_axis_cfg, x_field or "X"),
         "yAxis": _build_value_axis(y_axis_cfg, y_field or "Y"),
-        "series": [{"type": "scatter", "data": scatter_data, "label": {"show": True, "position": "right", "formatter": "{b}"}}]}
+        "series": [{"type": "scatter", "data": scatter_data,
+                    "label": {"show": True, "position": "right", "formatter": "{b}"}}]}
     legend = _build_threshold_legend(thresholds)
     if legend:
         option["legend"] = legend
@@ -245,15 +243,20 @@ def _build_scatter_trend(rows: list[dict], cfg: dict, title: str) -> dict[str, A
     y_axis_cfg = cfg.get("y_axis", {})
     prev_rows = [r for r in rows if r.get(series_field) == prev_period]
     curr_rows = [r for r in rows if r.get(series_field) == curr_period]
+
     def make_data(period_rows: list[dict]) -> list[dict]:
         return [
-            {"value": [_to_numeric(r.get(x_field)), _to_numeric(r.get(y_field))], "name": str(r.get(label_field, "")), "symbolSize": 14}
+            {"value": [_to_numeric(r.get(x_field)), _to_numeric(r.get(y_field))],
+             "name": str(r.get(label_field, "")), "symbolSize": 14}
             for r in period_rows]
+
     series = [
         {"name": prev_period, "type": "scatter", "symbolSize": 12,
-         "itemStyle": {"color": color_by.get(prev_period, PALETTE["gray"]), "opacity": 0.6}, "data": make_data(prev_rows)},
+         "itemStyle": {"color": color_by.get(prev_period, PALETTE["gray"]), "opacity": 0.6},
+         "data": make_data(prev_rows)},
         {"name": curr_period, "type": "scatter", "symbolSize": 18,
-         "itemStyle": {"color": color_by.get(curr_period, PALETTE["red"])}, "data": make_data(curr_rows),
+         "itemStyle": {"color": color_by.get(curr_period, PALETTE["red"])},
+         "data": make_data(curr_rows),
          "label": {"show": True, "position": "right", "formatter": "{b}"}}]
     if cfg.get("arrow"):
         prev_by_name = {str(r.get(label_field)): r for r in prev_rows}
@@ -264,13 +267,13 @@ def _build_scatter_trend(rows: list[dict], cfg: dict, title: str) -> dict[str, A
                 p = prev_by_name[name]
                 arrow_data.append({
                     "coords": [[_to_numeric(p.get(x_field)), _to_numeric(p.get(y_field))],
-                                [_to_numeric(r.get(x_field)), _to_numeric(r.get(y_field))]]})
+                               [_to_numeric(r.get(x_field)), _to_numeric(r.get(y_field))]]})
         if arrow_data:
             series.append({
                 "name": "trend", "type": "lines",
                 "effect": {"show": True, "symbol": "arrow", "symbolSize": 8},
                 "lineStyle": {"color": PALETTE["orange"], "width": 1.5, "opacity": 0.8},
-                "data": arrow_data})      
+                "data": arrow_data})
     return {
         "title": {"text": title, "left": "center", "textStyle": {"fontSize": 14}},
         "tooltip": {"trigger": "item", "formatter": "{a}: {b}"},
@@ -280,40 +283,46 @@ def _build_scatter_trend(rows: list[dict], cfg: dict, title: str) -> dict[str, A
         "yAxis": _build_value_axis(y_axis_cfg, y_field or "Y"),
         "series": series}
 
-# Утилиты
 def _build_value_axis(axis_cfg: dict, fallback_name: str) -> dict:
-    """ Универсальный строитель оси типа "value". Берёт параметры из cfg, иначе дефолты """
     axis = {"type": "value", "name": axis_cfg.get("name", fallback_name)}
-    if "min" in axis_cfg: axis["min"] = axis_cfg["min"]
-    if "max" in axis_cfg: axis["max"] = axis_cfg["max"]
-    if "interval" in axis_cfg: axis["interval"] = axis_cfg["interval"]
+    if "min" in axis_cfg:
+        axis["min"] = axis_cfg["min"]
+    if "max" in axis_cfg:
+        axis["max"] = axis_cfg["max"]
+    if "interval" in axis_cfg:
+        axis["interval"] = axis_cfg["interval"]
     return axis
 
 def _filter_dict(src: dict, keys: list[str]) -> dict:
-    """ Возвращает из словаря только указанные ключи """
     return {k: v for k, v in src.items() if k in keys}
 
 def _resolve_color(numeric_value: float, thresholds: list[dict]) -> str:
-    if not thresholds: return PALETTE["blue"]
+    if not thresholds:
+        return PALETTE["blue"]
     numeric_thresholds = []
     for t in thresholds:
-        try: numeric_thresholds.append((float(t["value"]), t.get("color", PALETTE["blue"])))
-        except (TypeError, ValueError): pass
-        
+        try:
+            numeric_thresholds.append((float(t["value"]), t.get("color", PALETTE["blue"])))
+        except (TypeError, ValueError):
+            pass
     if numeric_thresholds:
         numeric_thresholds.sort(key=lambda x: x[0], reverse=True)
         for threshold_val, color in numeric_thresholds:
-            if numeric_value >= threshold_val: return color
+            if numeric_value >= threshold_val:
+                return color
         return numeric_thresholds[-1][1]
     return PALETTE["blue"]
 
 def _resolve_color_by_value(value: Any, thresholds: list[dict]) -> str:
-    if not thresholds: return PALETTE["blue"]
-    try: return _resolve_color(float(value), thresholds)
+    if not thresholds:
+        return PALETTE["blue"]
+    try:
+        return _resolve_color(float(value), thresholds)
     except (TypeError, ValueError):
         val_str = str(value).lower()
         for t in thresholds:
-            if str(t.get("value", "")).lower() == val_str: return t.get("color", PALETTE["blue"])
+            if str(t.get("value", "")).lower() == val_str:
+                return t.get("color", PALETTE["blue"])
         return PALETTE["blue"]
 
 def _build_threshold_legend(thresholds: list[dict]) -> dict | None:
@@ -322,5 +331,6 @@ def _build_threshold_legend(thresholds: list[dict]) -> dict | None:
 
 def _empty_option(message: str) -> dict[str, Any]:
     return {
-        "title": {"text": message, "left": "center", "top": "center", "textStyle": {"color": "#aaa", "fontSize": 13}},
+        "title": {"text": message, "left": "center", "top": "center",
+                  "textStyle": {"color": "#aaa", "fontSize": 13}},
         "series": []}

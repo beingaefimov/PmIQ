@@ -1,14 +1,16 @@
-""" Dynamic CSV-based Mock MCP Server.
-Сканирует папку плагина, находит CSV-файлы (мок-данные) в папках скиллов и отдает эти данные как MCP-сервер """
+""" Mock-сервер, читающий .mcp.json плагина и отдающий данные из CSV-файлов
+из skills/*/. Возвращает JSON с Markdown-таблицей для LLM + _raw_data """
+
+from __future__ import annotations
 
 import asyncio
 import argparse
 import csv
 import json
 import sys
-import yaml
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
+
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
@@ -24,13 +26,12 @@ def load_csv_as_dicts(csv_path: Path) -> List[Dict[str, str]]:
         return list(csv.DictReader(f))
 
 def filter_data(
-    data: List[Dict[str, str]],
-    arguments: Dict[str, Any]) -> tuple[List[Dict[str, str]], List[str]]:
+        data: List[Dict[str, str]],
+        arguments: Dict[str, Any]) -> tuple[List[Dict[str, str]], List[str]]:
     if not arguments:
         return data, []
     warnings: List[str] = []
     csv_keys = list(data[0].keys()) if data else []
-    # Проверяем все ключи фильтра
     for key in arguments:
         matched = next((k for k in csv_keys if k.lower() == key.lower()), None)
         if not matched:
@@ -45,7 +46,6 @@ def filter_data(
             if csv_key:
                 if str(row[csv_key]).strip().lower() != str(value).strip().lower():
                     match = False
-                    # Отсутствующий ключ игнорируем
                     break
         if match:
             filtered.append(row)
@@ -56,7 +56,7 @@ def convert_to_markdown_table(data: List[Dict[str, str]]) -> str:
         return "(нет данных)"
     headers = list(data[0].keys())
     header_row = "| " + " | ".join(headers) + " |"
-    separator  = "|" + "|".join(["---"] * len(headers)) + "|"
+    separator = "|" + "|".join(["---"] * len(headers)) + "|"
     rows = ["| " + " | ".join(str(row.get(h, "")) for h in headers) + " |"
             for row in data]
     return "\n".join([header_row, separator] + rows)
@@ -70,7 +70,7 @@ def main():
         print(f"Error: Plugin directory not found: {plugin_dir}", file=sys.stderr)
         sys.exit(1)
     app = Server(f"pm-iq-mock-{args.plugin}")
-    # Загружаем список инструментов из .mcp.json
+
     mcp_config_path = plugin_dir / ".mcp.json"
     with open(mcp_config_path, "r", encoding="utf-8") as f:
         mcp_config = json.load(f)
@@ -84,7 +84,7 @@ def main():
                     inputSchema={"type": "object", "properties": {}, "required": []}))
             else:
                 tools_list.append(Tool(**tool_def))
-    # Маппинг tool_name в Path CSV
+
     tool_to_csv: Dict[str, Path] = {}
     skills_dir = plugin_dir / "skills"
     if skills_dir.exists():
@@ -112,15 +112,12 @@ def main():
             for w in filter_warnings:
                 print(f"[WARNING] filter_data: {w}", file=sys.stderr, flush=True)
             response: Dict[str, Any] = {
-                # Markdown-таблица для LLM
                 "data": convert_to_markdown_table(filtered_data),
-                # Предупреждения фильтрации
                 "filter_warnings": filter_warnings,
-                # Скрытое поле с сырыми данными для кэша Python-агента.
-                # LLM это не увидит, так как агент вырежет его перед отправкой в историю
-                "_raw_data": filtered_data }
+                "_raw_data": filtered_data,
+            }
             print(f"[DEBUG] Response: {len(filtered_data)} rows (raw data mode)",
-                file=sys.stderr, flush=True)
+                  file=sys.stderr, flush=True)
             return [TextContent(
                 type="text",
                 text=json.dumps(response, ensure_ascii=False, indent=2))]

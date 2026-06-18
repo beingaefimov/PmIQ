@@ -13,7 +13,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 # Импортируем агента
 sys.path.insert(0, str(Path(__file__).parent))
@@ -22,8 +22,22 @@ from pm_iq_agent import PmIqAgent
 # Хранилище активных сессий
 active_sessions: Dict[str, Dict] = {}
 
+# Допустимые режимы работы (значения, которые может прислать фронтенд)
+ALLOWED_MODES = ("concentrator", "stateless")
+DEFAULT_MODE = "concentrator"
+
 class QuestionRequest(BaseModel):
     query: str
+    mode: str = DEFAULT_MODE
+
+    @field_validator("mode")
+    @classmethod
+    def _validate_mode(cls, v: str) -> str:
+        v = (v or "").strip().lower()
+        if v not in ALLOWED_MODES:
+            raise ValueError(
+                f"Недопустимый режим {v!r}. Допустимые: {ALLOWED_MODES}")
+        return v
 
 class PredefinedQuestion(BaseModel):
     id: str
@@ -54,7 +68,6 @@ app.add_middleware(
 
 agent = PmIqAgent()
 
-# Предопределённые вопросы
 PREDEFINED_QUESTIONS = [
     PredefinedQuestion(id="1", category="Resources", text="Проанализируй загрузку команды разработки, ответь с диаграммой."),
     PredefinedQuestion(id="2", category="Risks", text="Покажи активные риски с высоким воздействием для проекта 'Миграция ERP' и предложи план реагирования."),
@@ -79,23 +92,49 @@ async def get_predefined_questions() -> List[PredefinedQuestion]:
     """ Get list of predefined questions """
     return PREDEFINED_QUESTIONS
 
+@app.get("/api/modes")
+async def get_modes() -> Dict[str, Any]:
+    """ Возвращает список доступных режимов работы агента.
+    Фронт использует для построения переключателя """
+    return {
+        "default": DEFAULT_MODE,
+        "modes": [
+            {
+                "id": "concentrator",
+                "label": "Концентратор + ReAct (v.0.2)",
+                "description": (
+                    "сжатие знаний + цикл ReAct с накапливаемой историей (траектория)"
+                ),
+            },
+            {
+                "id": "stateless",
+                "label": "Stateless ReAct (v.0.01)",
+                "description": (
+                    "цикл «с чистого листа» на каждом шаге (полный набор методологий + растущий блок получаемых из ИС данных + исходный вопрос), история цикла ReAct не накапливается"
+                ),
+            },
+        ],
+    }
+
 @app.post("/api/ask")
 async def ask_question(request: QuestionRequest):
     """ Submit a question and get a session ID """
     session_id = f"session_{len(active_sessions) + 1}"
     active_sessions[session_id] = {
         "query": request.query,
+        "mode": request.mode,
         "logs": [],
         "result": None,
         "status": "processing"}
-    asyncio.create_task(process_question(session_id, request.query))
-    return {"session_id": session_id}
+    asyncio.create_task(process_question(session_id, request.query, request.mode))
+    return {"session_id": session_id, "mode": request.mode}
 
 @app.get("/stream/{session_id}")
 async def stream_logs(session_id: str):
-    """SSE endpoint for streaming logs"""
+    """ SSE endpoint for streaming logs """
     if session_id not in active_sessions:
         raise HTTPException(status_code=404, detail="Session not found")
+
     async def event_generator():
         last_log_count = 0
         while True:
@@ -103,13 +142,11 @@ async def stream_logs(session_id: str):
             if not session:
                 break
             current_logs = session["logs"]
-            # Отправляем новые логи
             if len(current_logs) > last_log_count:
                 new_logs = current_logs[last_log_count:]
                 for log_line in new_logs:
                     yield f"data: {json.dumps({'type': 'log', 'data': log_line})}\n\n"
                 last_log_count = len(current_logs)
-            # Если результат готов
             if session["status"] == "completed" and not session.get("result_sent"):
                 yield f"data: {json.dumps({'type': 'result', 'data': session['result']})}\n\n"
                 session["result_sent"] = True
@@ -119,6 +156,7 @@ async def stream_logs(session_id: str):
                 session["error_sent"] = True
                 break
             await asyncio.sleep(0.3)
+
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
@@ -140,50 +178,50 @@ async def get_result(session_id: str):
 
 class RealtimeLogWriter(io.TextIOBase):
     """ Перехватывает print и пишет в сессию в реальном времени """
+
     def __init__(self, session):
         self.session = session
         self.buffer = ""
+
     def write(self, s):
         self.buffer += s
-        # Разбиваем по строкам и добавляем в логи
         while '\n' in self.buffer:
             line, self.buffer = self.buffer.split('\n', 1)
-            if line.strip():  # пропускаем пустые строки
+            if line.strip():
                 self.session["logs"].append(line)
         return len(s)
+
     def flush(self):
         if self.buffer.strip():
             self.session["logs"].append(self.buffer)
             self.buffer = ""
 
-async def process_question(session_id: str, query: str):
-    """ Process question with real-time log streaming """
+async def process_question(session_id: str, query: str, mode: str):
     try:
         session = active_sessions[session_id]
-        session["logs"] = [f"Processing query: {query}"]
-        session["logs"].append(f"Loaded tools: {len(agent.all_tools)}")
-        # Кастомный writer для реального времени
+        session["logs"] = [
+            f"Processing query: {query}",
+            f"Mode: {mode}",
+            f"Loaded tools: {len(agent.all_tools)}"]
         log_writer = RealtimeLogWriter(session)
-        # Перенаправляем stdout и stderr
         old_stdout = sys.stdout
         old_stderr = sys.stderr
         sys.stdout = log_writer
         sys.stderr = log_writer
         try:
-            # Запускаем агента с периодическими yield для event loop
-            result = await agent.run(query)
+            # Передаём mode в агент - режим переключается на каждый запрос
+            result = await agent.run(query, mode=mode)
         finally:
             sys.stdout = old_stdout
             sys.stderr = old_stderr
             log_writer.flush()
-        # Парсим виджеты из ответа
         widgets = extract_widgets_from_answer(result)
-        # Убираем JSON-блоки с виджетами из markdown-ответа
         clean_answer = remove_widget_json_from_answer(result)
         session["result"] = {
             "answer": clean_answer,
-            "raw_answer": result,  # сохраняем оригинал для отладки
-            "widgets": widgets}
+            "raw_answer": result,
+            "widgets": widgets,
+            "mode": mode}
         session["status"] = "completed"
         session["logs"].append("Completed")
     except Exception as e:
@@ -195,35 +233,33 @@ async def process_question(session_id: str, query: str):
 
 def remove_widget_json_from_answer(answer: str) -> str:
     """ Удаляет JSON-блоки виджетов из markdown-ответа """
-    import re
-    # Находим все ```json ... ``` блоки
-    pattern = r'```json\s*(\{[^`]*"widget_type"\s*:\s*"echarts"[^`]*\}|\{[^`]*"chart_type"\s*:\s*"ActionCard"[^`]*\})\s*```'
+    pattern = (
+        r'```json\s*'
+        r'(\{[^`]*"widget_type"\s*:\s*"echarts"[^`]*\}'
+        r'|\{[^`]*"chart_type"\s*:\s*"ActionCard"[^`]*\})\s*```'
+    )
     cleaned = re.sub(pattern, '', answer, flags=re.DOTALL)
-    # Убираем лишние пустые строки
     cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
     return cleaned.strip()
 
 def extract_widgets_from_answer(answer: str) -> List[Dict[str, Any]]:
     """ Extract ECharts JSON blocks from answer """
     widgets = []
-    # Ищем все ```json ... ``` блоки
     pattern = r'```json\s*(.*?)\s*```'
     matches = re.findall(pattern, answer, re.DOTALL)
     for match in matches:
         try:
             widget_data = json.loads(match.strip())
-            # Проверяем, что это виджет ECharts
             if isinstance(widget_data, dict) and widget_data.get("widget_type") == "echarts":
                 widgets.append(widget_data)
             elif isinstance(widget_data, dict) and widget_data.get("chart_type") == "ActionCard":
                 widgets.append(widget_data)
         except json.JSONDecodeError:
             continue
-    
     return widgets
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000,
-        timeout_keep_alive=1200,    # 20 минут для HTTP keep-alive
-        ws_ping_interval=20,    # ping каждые 20 сек
-        ws_ping_timeout=1200)   # ждём pong 20 минут
+                timeout_keep_alive=1200,    # 20 минут для HTTP keep-alive
+                ws_ping_interval=20,    # ping каждые 20 сек
+                ws_ping_timeout=1200)   # ждём pong 20 минут

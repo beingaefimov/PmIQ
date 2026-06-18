@@ -1,73 +1,89 @@
-""" Агент с этапом концентрации знаний.
-Пайплайн:
-    Фаза А - route_query: LLM выбирает 1-3 релевантных плагина
-    Фаза А.5 - Skill concentrate: сжимает методичку под вопрос
-        и формирует самодостаточный план + planned_widgets
-    Фаза Б - ReAct-цикл: Thought -> Action -> Observation -> ... -> Final Answer
-        где промпт строится из концентрата, а не из полной методички """
+from __future__ import annotations
 
 import asyncio
 import json
 import re
 import sys
-from pathlib import Path
-from typing import List, Dict, Any
-import yaml
 import fnmatch
-from widget_renderer import render_widget
+import yaml
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+from openai import OpenAI
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-from openai import OpenAI
 
-from concentrator import (
-    SkillConcentrator,
-    ConcentratedContext,
-    is_special_widget,
-    SPECIAL_WIDGET_TYPES)
+from widget_renderer import render_widget
+from agent_utils import (
+    parse_llm_response,
+    detect_loop,
+    detect_hallucinations,
+    expand_widget_descriptors,
+    extract_plan_block,
+    parse_plan_steps,
+    is_consecutive_duplicate,
+    make_call_signature,
+)
+
+# "concentrator" — исходный ReAct-цикл с историей диалога + концентратор знаний.
+# "stateless" — альтернативный цикл: повторный роутинг каждую итерацию,
+#               накопление фактических данных вместо истории, анти-луп
+#               через стек последних 2 вызовов
+LOOP_MODE = "stateless"
+
+# Маппинг внешних имён режимов для обратной совместимости
+_MODE_DISPATCH = {
+    "concentrator": "history",
+    "history":      "history",
+    "stateless":    "stateless"}
 
 PM_IQ_ROOT = Path(__file__).parent.parent
 
-# Настройки LLM
 LLM_BASE_URL = "http://localhost:3101/v1"
 LLM_MODEL_NAME = "local-model"
 _MAX_TOKENS = 8096
 _TEMPERATURE = 0.1
+_MAX_ITERATIONS_HISTORY = 16
+_MAX_ITERATIONS_STATELESS = 16
+# В stateless-режиме: размер стека последних вызовов для анти-loop
+_STATELESS_RECENT_STACK_SIZE = 2
 
-# Парсер структуры плагинов/скиллов
 class PmIqStructureParser:
+    """ Парсер каталога плагинов и их скиллов из файловой системы """
+    
     def __init__(self, root_path: Path):
         self.root_path = root_path
         self.plugins_dir = root_path / "plugins"
         self.plugins: List[Dict[str, Any]] = []
 
-    def _parse_skill(self, skill_dir: Path) -> Dict[str, Any]:
+    def _parse_skill(self, skill_dir: Path) -> Optional[Dict[str, Any]]:
         skill_file = skill_dir / "SKILL.md"
         if not skill_file.exists():
             return None
-        with open(skill_file, 'r', encoding='utf-8') as f:
+        with open(skill_file, "r", encoding="utf-8") as f:
             content = f.read()
-        if not content.startswith('---'):
+        if not content.startswith("---"):
             return None
-        parts = content.split('---', 2)
+        parts = content.split("---", 2)
         if len(parts) < 3:
             return None
         frontmatter = yaml.safe_load(parts[1]) or {}
-        # Отдаём модели весь файл, включая YAML-описание виджетов
         full_instructions = f"{parts[1].strip()}\n---\n{parts[2].strip()}"
-        return { "name": frontmatter.get("name", skill_dir.name),
+        return {
+            "name": frontmatter.get("name", skill_dir.name),
             "description": frontmatter.get("description", ""),
             "instructions": full_instructions,
             "path": skill_dir,
             "available_widgets": frontmatter.get("available_widgets", [])}
 
     def _parse_plugin(self, plugin_dir: Path) -> Dict[str, Any]:
-        plugin_info = {"name": plugin_dir.name,
+        plugin_info = {
+            "name": plugin_dir.name,
             "path": plugin_dir,
             "skills": [],
             "mcp_config": None}
         mcp_config_file = plugin_dir / ".mcp.json"
         if mcp_config_file.exists():
-            with open(mcp_config_file, 'r', encoding='utf-8') as f:
+            with open(mcp_config_file, "r", encoding="utf-8") as f:
                 plugin_info["mcp_config"] = json.load(f)
         skills_dir = plugin_dir / "skills"
         if skills_dir.exists():
@@ -82,7 +98,7 @@ class PmIqStructureParser:
         if not self.plugins_dir.exists():
             raise ValueError(f"Директория плагинов не найдена: {self.plugins_dir}")
         for plugin_dir in sorted(self.plugins_dir.iterdir()):
-            if not plugin_dir.is_dir() or plugin_dir.name.startswith('.'):
+            if not plugin_dir.is_dir() or plugin_dir.name.startswith("."):
                 continue
             plugin_info = self._parse_plugin(plugin_dir)
             if plugin_info:
@@ -96,14 +112,15 @@ class PmIqAgent:
         self.mcp_sessions: Dict[str, ClientSession] = {}
         self.all_tools: List[Dict[str, Any]] = []
         self._context_managers: List[tuple] = []
-        # Кэш сырых данных { "tool_name": [список словарей] }
         self.data_cache: Dict[str, List[Dict[str, str]]] = {}
-        # История вызовов инструментов для защиты от дубль-вызовов
-        # { (tool_name, json_args): observation_text }
+        # Для history-режима
         self._tool_call_history: Dict[tuple, str] = {}
-        # Счётчик вызовов: { (tool_name, json_args): count }
         self._tool_call_counts: Dict[tuple, int] = {}
-        # Концентратор знаний
+        # Для stateless-режима - стек последних вызовов (tool_name, args)
+        self._recent_calls_stack: List[Tuple[str, Dict[str, Any]]] = []
+        # Концентратор знаний (используется только в history-режиме).
+        # Импортируем лениво, чтобы не тащить зависимость в stateless-режим
+        from concentrator import SkillConcentrator
         self.concentrator = SkillConcentrator(
             llm_client=self.llm_client,
             llm_model_name=LLM_MODEL_NAME,
@@ -117,136 +134,18 @@ class PmIqAgent:
         await self._connect_to_mcp_servers()
         print(f"Загружено {len(self.all_tools)} инструментов (внутренний реестр)")
 
-    def _expand_widget_descriptors(self, final_answer: str) -> str:
-        """ Постобработка виджетов после получения Final Answer от LLM.
-        Ищет JSON-блоки с полем "widget_type" двумя способами:
-          1. Fenced: ```json ... ``` (стандартный формат)
-          2. Bare: { ... "widget_type": ... ... } тк LLM иногда забывает ограждения.
-        Каждый найденный дескриптор прогоняется через render_widget и заменяется
-        на отрендеренный envelope в ```json ... ``` формате """
-
-        def fix_underscore_spaces(m):
-            """ LLM бывает вставляет пробелы в ключи: например "data_ rows" чистим в "data_rows" """
-            inner = m.group(1)
-            fixed = re.sub(r'_\s+', '_', inner)
-            return f'"{fixed}"'
-
-        def process_raw_json(raw: str) -> str | None:
-            """ Возвращает отрендеренный envelope (в ```json ... ```) или None """
-            raw = raw.strip()
-            raw = re.sub(r'"([^"]*)"', fix_underscore_spaces, raw)
+    async def close(self):
+        """ Подавляет шумные BaseExceptionGroup / GeneratorExit от anyio/mcp """
+        for stdio_cm, session in self._context_managers:
             try:
-                descriptor = json.loads(raw)
-            except json.JSONDecodeError as e:
-                print(f"[WidgetRenderer] JSONDecodeError: {e} | raw[:200]: {raw[:200]}")
-                return None
-            if "widget_type" not in descriptor:
-                return None
-            # Если это уже отрендеренный бэкендом график (echarts), не трогаем
-            if descriptor.get("widget_type") == "echarts":
-                return None
-            echarts_envelope = render_widget(descriptor)
-            if echarts_envelope is None:
-                print(f"[WidgetRenderer] render_widget=None для intent={descriptor.get('intent')}")
-                return None
-            expanded = json.dumps(echarts_envelope, ensure_ascii=False, indent=2)
-            print(f"[WidgetRenderer] OK: {descriptor.get('widget_type')}/{descriptor.get('intent')} -> {len(expanded)} chars")
-            return f"```json\n{expanded}\n```"
+                await session.__aexit__(None, None, None)
+            except Exception:
+                pass
+            try:
+                await stdio_cm.__aexit__(None, None, None)
+            except Exception:
+                pass
 
-        # Обрабатываем fenced-блоки (```json ... ```)
-        json_block_re = re.compile(r"```json\s*([\s\S]*?)```", re.MULTILINE)
-        def replace_fenced(match: re.Match) -> str:
-            rendered = process_raw_json(match.group(1))
-            return rendered if rendered is not None else match.group(0)
-        result = json_block_re.sub(replace_fenced, final_answer)
-        # обрабатываем bare JSON-блоки с "widget_type"
-        # LLM иногда не оборачивает JSON в ограждения. Ищем сбалансированные
-        # {...} блоки, содержащие "widget_type", и обрабатываем их.
-        # Пропускаем блоки внутри ``` ... ``` fences (они уже обработаны
-        # ранее или это другой код - не трогаем).
-        bare_blocks: list[tuple[int, int, str]] = []  # (start, end, raw_json)
-        # Сначала находим все span-ы code fences (начало/конец).
-        # \n? - опциональный, т.к. последний ``` может быть в конце текста без \n
-        fence_re = re.compile(r"```[a-zA-Z0-9]*\n?")
-        fence_spans: list[tuple[int, int]] = []
-        fence_starts = [m.start() for m in fence_re.finditer(result)]
-        for k in range(0, len(fence_starts) - 1, 2):
-            open_start = fence_starts[k]
-            close_start = fence_starts[k + 1]
-            # span covers from ```json\n ... up to start of closing ```
-            fence_spans.append((open_start, close_start))
-
-        def in_fence(pos: int) -> bool:
-            for fs, fe in fence_spans:
-                if fs <= pos < fe:
-                    return True
-            return False
-
-        i = 0
-        text = result
-        while i < len(text):
-            ch = text[i]
-            if ch != "{":
-                i += 1
-                continue
-            # Пропускаем, если курсор внутри code fence
-            if in_fence(i):
-                i += 1
-                continue
-            # Пробуем найти сбалансированный {...} начиная с i
-            depth = 0
-            in_string = False
-            escape = False
-            j = i
-            while j < len(text):
-                c = text[j]
-                if escape:
-                    escape = False
-                    j += 1
-                    continue
-                if c == "\\":
-                    escape = True
-                    j += 1
-                    continue
-                if c == '"':
-                    in_string = not in_string
-                    j += 1
-                    continue
-                if in_string:
-                    j += 1
-                    continue
-                if c == "{":
-                    depth += 1
-                elif c == "}":
-                    depth -= 1
-                    if depth == 0:
-                        # Нашли сбалансированный блок
-                        raw = text[i:j + 1]
-                        # Проверяем, что это виджет (содержит "widget_type")
-                        if '"widget_type"' in raw or '"widget_type ' in raw:
-                            bare_blocks.append((i, j + 1, raw))
-                        i = j + 1
-                        break
-                j += 1
-            else:
-                # Не сбалансировано - выходим
-                break
-            if depth != 0:
-                break
-        # Заменяем bare-блоки справа налево, чтобы не сбить индексы
-        for start, end, raw in reversed(bare_blocks):
-            rendered = process_raw_json(raw)
-            if rendered is not None:
-                result = result[:start] + rendered + result[end:]
-        return result
-
-    def _clean_broken_json(self, text: str) -> str:
-        """ Удаляет оборванные ```json блоки, если LLM уперлась в max_tokens """
-        cleaned = re.sub(r"```json\s*[\s\S]*?(?=```)", lambda m: m.group(0) if text.count("```") % 2 == 0 else "", text)
-        cleaned = re.sub(r"```json\s*[\s\S]*?(?<!```)$", "", text)
-        return cleaned.strip()
-
-    # MCP-подключения
     async def _connect_to_mcp_servers(self):
         for plugin in self.structure.plugins:
             if not plugin["mcp_config"]:
@@ -277,131 +176,439 @@ class PmIqAgent:
         self._context_managers.append((stdio_cm, session))
         return session
 
-    async def close(self):
-        """ Подавляет шумные BaseExceptionGroup / GeneratorExit от anyio/mcp """
-        for stdio_cm, session in self._context_managers:
-            try:
-                await session.__aexit__(None, None, None)
-            except Exception:
-                pass
-            try:
-                await stdio_cm.__aexit__(None, None, None)
-            except Exception:
-                pass
+    async def run(self, query: str, mode: Optional[str] = None) -> str:
+        effective_mode = _MODE_DISPATCH.get(mode, None) if mode else LOOP_MODE
+        if effective_mode is None:
+            raise ValueError(
+                f"Неизвестный режим: {mode!r}. "
+                f"Допустимые значения: {list(_MODE_DISPATCH.keys())}")
+        if effective_mode == "history":
+            return await self.run_history_loop(query)
+        elif effective_mode == "stateless":
+            return await self.run_stateless_loop(query)
+        else:
+            raise ValueError(f"Неизвестный внутренний режим: {effective_mode!r}")
 
-    # Фаза А - Маршрутизация
-    async def route_query(self, query: str) -> List[str]:
-        """ Архитектура с мульти-плагиновой маршрутизацией (Уровень 1).
-        При проектировании агентных систем с большим количеством инструментов (30+) 
-        существует дилемма: "Полнота контекста" vs "Перегрузка контекста (Context Bloat)".
-        Известные подходы:
-        Уровень 1: Мульти-плагиновый роутер (текущая реализация)
-        - Как работает: LLM сначала анализирует запрос и выбирает 1-3 релевантных плагина. 
-        Затем в ReAct-промт загружаются инструменты и инструкции только этих плагинов.
-        - Плюсы: Резкая экономия токенов (вместо 30 инструментов в промпте попадает 4-8), 
-        высокая надежность на локальных моделях (7B-8B), поддержка кросс-доменных запросов 
-        (например, "задержка и бюджет" выберет 2 плагина).
-        - Минусы: Зависит от способности LLM корректно классифицировать запрос по доменам.
-        - Условия применения: Локальные LLM, < 50 инструментов, чёткие границы доменов.
-        Уровкнь 1 bis: Добавить 1.2 уровень роутинга - после выбора плагина, LLM выбирает конкретный скилл внутри него.
-        Но только введя арбитра, оценщика выбранного скиллса и если выбор одного не очевиден (ясно, что он покрывает вопрос),
-        то оставлять все.
-        Уровень 2: Семантический поиск инструментов "RAG for Tools"
-        - Как работает: Описания всех инструментов векторизуются. При запросе 
-        выполняется семантический поиск (cosine similarity), и в промпт попадают топ(5) 
-        наиболее релевантных инструментов, независимо от того, в каком они плагине.
-        - Плюсы: Бесконечная масштабируемость (1000+ инструментов), не зависит от жестких 
-        границ плагинов, находит инструменты по смыслу, а не по названию категории.
-        - Минусы: Требует локальной модели эмбеддингов, векторного хранилища (QDrant/Chroma/FAISS), 
-        усложняет архитектуру.
-        - Условия применения: Продакшен-системы с > 50 инструментами, сильно пересекающимися доменами.
-        Уровень 3: Иерархия суб-агентов
-        - Как работает: Главный агент-диспетчер разбивает сложный запрос на подзадачи и 
-        делегирует их специализированным суб-агентам (например, "Агент расписания" и "Агент рисков"), 
-        которые общаются друг с другом.
-        - Плюсы: Глубочайшее рассуждение, автономность, решение сверхсложных задач.
-        - Минусы: Экспоненциальный рост затрат токенов, высокая задержка (latency), высокий 
-        риск зацикливания или потери контекста.
-        - Условия применения: Мощные, желательно естественные, модели (GPT-4o, Claude 3.5 Sonnet), сложные 
-        многоэтапные автономные workflow"""
-        plugins_summary = []
-        for p in self.structure.plugins:
-            skills_desc = "\n    ".join([f"- {s['name']}: {s['description']}" for s in p['skills']])
-            plugins_summary.append(f"### {p['name']}\n    {skills_desc}")
-        prompt = f"""Вы — маршрутизатор запросов по управлению проектами.
-Проанализируйте запрос пользователя и выберите от 1 до 3 НАИБОЛЕЕ РЕЛЕВАНТНЫХ доменов-плагинов.
-
-КРИТИЧЕСКОЕ УКАЗАНИЕ:
-- Если запрос упоминает НЕСКОЛЬКО аспектов (например, задержки И бюджет, расписание И риски), вы ОБЯЗАНЫ выбрать ВСЕ релевантные плагины, а не только один.
-- Внимательно читайте описания скиллов. Каждое описание объясняет, какие типы запросов обрабатывает скилл.
-- Сопоставляйте интент пользователя с теми скиллами, чьи описания покрывают релевантные аспекты.
-
-Доступные домены со скиллами:
-{chr(10).join(plugins_summary)}
-
-Запрос пользователя: {query}
-
-Ответьте ТОЛЬКО валидным JSON-массивом имён плагинов.
-Пример: ["pm-project-core", "pm-value-and-performance"]
-Не добавляйте markdown-форматирование и пояснения."""
+    async def _call_llm(self, messages: List[Dict[str, str]],
+        temperature: float = _TEMPERATURE,
+        max_tokens: int = _MAX_TOKENS) -> str:
         loop = asyncio.get_event_loop()
 
-        def sync_llm_call():
+        def sync_call():
             return self.llm_client.chat.completions.create(
                 model=LLM_MODEL_NAME,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=_TEMPERATURE)
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens)
+        response = await loop.run_in_executor(None, sync_call)
+        return response.choices[0].message.content
 
-        response = await loop.run_in_executor(None, sync_llm_call)
-        raw_response = response.choices[0].message.content.strip()
+    async def route_query(self, query: str,
+        accumulated_data: str = "") -> List[str]:
+        """ Выбор 1–3 релевантных плагинов по вопросу.
+        В stateless-режиме в accumulated_data передаётся накопленный блок
+        фактических данных, чтобы маршрутизация учитывала уже собранное """
+        plugins_summary = []
+        for p in self.structure.plugins:
+            skills_desc = "\n    ".join(
+                [f"- {s['name']}: {s['description']}" for s in p["skills"]])
+            plugins_summary.append(f"### {p['name']}\n    {skills_desc}")
 
-        print(f"{'='*80}")
-        print(f"СЫРОЙ ОТВЕТ ОТ LLM (роутер):")
-        print(f"{'='*80}")
-        print(raw_response)
-        print(f"{'='*80}\n")
+        data_section = ""
+        if accumulated_data:
+            data_section = (
+                "\n\nУже известные данные компании:\n"
+                f"{accumulated_data}\n")
 
-        raw_response = raw_response.replace('```json', '').replace('```', '').strip()
+        prompt = (
+            "Вы — маршрутизатор запросов по управлению проектами.\n"
+            "Проанализируйте запрос пользователя и выберите от 1 до 3 НАИБОЛЕЕ "
+            "РЕЛЕВАНТНЫХ доменов-плагинов.\n\n"
+            "КРИТИЧЕСКОЕ УКАЗАНИЕ:\n"
+            "- Если запрос упоминает НЕСКОЛЬКО аспектов (например, задержки И "
+            "бюджет, расписание И риски), вы ОБЯЗАНЫ выбрать ВСЕ релевантные "
+            "плагины, а не только один.\n"
+            "- Внимательно читайте описания скиллов. Каждое описание объясняет, "
+            "какие типы запросов обрабатывает скилл.\n"
+            "- Сопоставляйте интент пользователя с теми скиллами, чьи описания "
+            "покрывают релевантные аспекты.\n\n"
+            f"Доступные домены со скиллами:\n{chr(10).join(plugins_summary)}\n"
+            f"{data_section}\n"
+            f"Запрос пользователя: {query}\n\n"
+            "Ответьте ТОЛЬКО валидным JSON-массивом имён плагинов.\n"
+            'Пример: ["pm-project-core", "pm-value-and-performance"]\n'
+            "Не добавляйте markdown-форматирование и пояснения."
+        )
+
+        raw = await self._call_llm(
+            [{"role": "user", "content": prompt}], temperature=0.0)
+        raw = raw.strip()
+        print("=" * 80)
+        print("СЫРОЙ ОТВЕТ ОТ LLM (роутер):")
+        print("=" * 80)
+        print(raw)
+        print("=" * 80 + "\n")
+        raw = raw.replace("```json", "").replace("```", "").strip()
         try:
-            selected_plugins = json.loads(raw_response)
-            if isinstance(selected_plugins, str):
-                selected_plugins = [selected_plugins]
-            # Иногда модель может вернуть имя скилла вместо плагина, проверяем
-            valid_plugins = []
-            for item in selected_plugins:
-                if any(plug["name"] == item for plug in self.structure.plugins):
-                    valid_plugins.append(item)
-                else:
-                    for plug in self.structure.plugins:
-                        if any(skill["name"] == item for skill in plug["skills"]):
-                            valid_plugins.append(plug["name"])
-                            print(f"LLM вернула имя скилла '{item}', маппим на плагин '{plug['name']}'")
-                            break
-            valid_plugins = list(dict.fromkeys(valid_plugins))
-            if not valid_plugins:
-                valid_plugins = ["pm-project-core"]
-            print(f"Маршрутизация: выбраны плагины {valid_plugins}")
-            return valid_plugins
+            selected = json.loads(raw)
+            if isinstance(selected, str):
+                selected = [selected]
         except json.JSONDecodeError:
-            print(f"Ошибка парсинга JSON от роутера. Ответ: {raw_response}. Fallback.")
+            print(f"Ошибка парсинга JSON от роутера. Fallback на pm-project-core.")
             return ["pm-project-core"]
 
-    # Фаза Б - ReAct-промпт
-    def _build_react_prompt(
+        # Маппим скиллы на плагины, если LLM вернула имя скилла
+        valid_plugins: List[str] = []
+        for item in selected:
+            if any(plug["name"] == item for plug in self.structure.plugins):
+                valid_plugins.append(item)
+            else:
+                for plug in self.structure.plugins:
+                    if any(skill["name"] == item for skill in plug["skills"]):
+                        valid_plugins.append(plug["name"])
+                        print(f"LLM вернула имя скилла '{item}', "
+                              f"маппим на плагин '{plug['name']}'")
+                        break
+        valid_plugins = list(dict.fromkeys(valid_plugins))
+        if not valid_plugins:
+            valid_plugins = ["pm-project-core"]
+        print(f"Маршрутизация: выбраны плагины {valid_plugins}")
+        return valid_plugins
+
+    async def _execute_tool_call(
+        self,
+        tool_name: str,
+        action_input: Dict[str, Any]) -> Tuple[str, Optional[List[Dict[str, str]]]]:
+        """ Вызывает MCP-инструмент. Возвращает (observation_text, raw_data).
+        raw_data может быть None, если ответ не содержит _raw_data """
+        tool = next((t for t in self.all_tools if t["name"] == tool_name), None)
+        if tool is None:
+            # Fuzzy-матчинг на опечатки
+            from difflib import get_close_matches
+            matches = get_close_matches(
+                tool_name, [t["name"] for t in self.all_tools], n=1, cutoff=0.7)
+            if matches:
+                tool = next(t for t in self.all_tools if t["name"] == matches[0])
+                print(f"Автоисправление (fuzzy): '{tool_name}' -> '{tool['name']}'")
+                tool_name = tool["name"]
+        if tool is None:
+            available = ", ".join(t["name"] for t in self.all_tools)
+            return (f"Error: Tool '{tool_name}' not found. "
+                    f"Available tools: {available}", None)
+        try:
+            session = self.mcp_sessions[tool["server"]]
+            print(f"Вызов MCP-сервера: {tool['server']}, инструмент: {tool_name}")
+            print(f"Аргументы: {json.dumps(action_input, ensure_ascii=False)}")
+            result = await session.call_tool(tool_name, action_input)
+            observation = "\n".join([
+                str(item.text) if hasattr(item, "text") else str(item)
+                for item in result.content])
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return f"Error executing tool: {e}", None
+        raw_data: Optional[List[Dict[str, str]]] = None
+        try:
+            obs_json = json.loads(observation)
+            if isinstance(obs_json, dict) and "_raw_data" in obs_json:
+                raw_data = obs_json.pop("_raw_data")
+                observation = json.dumps(obs_json, ensure_ascii=False, indent=2)
+                print(f"[CACHE] Извлечено {len(raw_data)} строк для {tool_name}")
+        except json.JSONDecodeError:
+            pass
+        return observation, raw_data
+
+    def _cache_tool_data(self, tool_name: str, raw_data: Optional[List[Dict[str, str]]]):
+        if raw_data is None:
+            return
+        # Кэшируем только если ещё нет (в stateless-режиме повторные вызовы
+        # того же инструмента с теми же args блокируются анти-loop, но
+        # разные args могут быть - данные могут обновляться или иметь иной смысл в контексте).
+        # Здесь используем простое поведение: последний выигрывает
+        self.data_cache[tool_name] = raw_data
+
+    def _build_intent_registry(self) -> Dict[str, Dict[str, Any]]:
+        registry: Dict[str, Dict[str, Any]] = {}
+        for plugin in self.structure.plugins:
+            for skill in plugin.get("skills", []):
+                for widget_def in skill.get("available_widgets", []):
+                    w_type = widget_def.get("type", "")
+                    for intent in widget_def.get("intents", []):
+                        intent_name = intent.get("name")
+                        if intent_name:
+                            tool_name = None
+                            skill_path = skill.get("path")
+                            if skill_path:
+                                csvs = list(skill_path.glob("*.csv"))
+                                if csvs:
+                                    tool_name = csvs[0].stem
+                            registry[intent_name] = {
+                                "widget_type": w_type,
+                                "config": intent.get("config", {}),
+                                "tool_name": tool_name,
+                                "description": intent.get("description", "").lower()}
+        return registry
+
+    def _render_system_widgets(self, final_answer: str) -> str:
+        """ Заменяет плейсхолдеры <!-- SYSTEM_WIDGET: ... --> на ECharts JSON """
+        intent_registry = self._build_intent_registry()
+        result_parts: List[str] = []
+        last_end = 0
+        start_marker = "<!-- SYSTEM"
+        end_marker = "-->"
+        start_idx = final_answer.find(start_marker)
+        while start_idx != -1:
+            result_parts.append(final_answer[last_end:start_idx])
+            end_idx = final_answer.find(end_marker, start_idx)
+            if end_idx == -1:
+                break
+            inner_text = final_answer[start_idx + len(start_marker): end_idx]
+            inner_text = inner_text.replace("_ ", "_").replace(" _", "_")
+            try:
+                filter_idx = inner_text.find("| FILTER:")
+                if filter_idx == -1:
+                    raise ValueError("Missing | FILTER: delimiter")
+                intent_part = inner_text[:filter_idx].strip()
+                rest_part = inner_text[filter_idx + len("| FILTER:"):].strip()
+                if ":" in intent_part:
+                    intent_name = intent_part.split(":")[-1].strip()
+                else:
+                    intent_name = intent_part.strip()
+                title_idx = rest_part.find("| TITLE:")
+                if title_idx == -1:
+                    raise ValueError("Missing | TITLE: delimiter")
+                filter_str = rest_part[:title_idx].strip()
+                title = rest_part[title_idx + len("| TITLE:"):].strip()
+                filter_rules = json.loads(filter_str)
+                for key, value in list(filter_rules.items()):
+                    if isinstance(value, str) and "|" in value:
+                        filter_rules[key] = [v.strip() for v in value.split("|")]
+                if intent_name not in intent_registry:
+                    from difflib import get_close_matches
+                    matches = get_close_matches(
+                        intent_name, list(intent_registry.keys()), n=1, cutoff=0.7)
+                    if matches:
+                        correct = matches[0]
+                        print(f"[WIDGET-FUZZY] Intent '{intent_name}' -> '{correct}'")
+                        intent_name = correct
+                    else:
+                        result_parts.append(
+                            f"<!-- ERROR: Unknown intent '{intent_name}'. "
+                            f"Available: {', '.join(intent_registry.keys())} -->")
+                        last_end = end_idx + len(end_marker)
+                        start_idx = final_answer.find(start_marker, last_end)
+                        continue
+                reg = intent_registry[intent_name]
+                # Защита: особые виджеты нельзя рендерить через плейсхолдер
+                if reg["widget_type"] in ("action_card", "ActionCard"):
+                    result_parts.append(
+                        f"<!-- ERROR: intent '{intent_name}' имеет тип "
+                        f"'{reg['widget_type']}' — это ОСОБЫЙ виджет. "
+                        f"Его НЕЛЬЗЯ рендерить через <!-- SYSTEM_WIDGET -->. -->")
+                    last_end = end_idx + len(end_marker)
+                    start_idx = final_answer.find(start_marker, last_end)
+                    continue
+                tool_name = reg["tool_name"]
+                if not tool_name or tool_name not in self.data_cache:
+                    result_parts.append(
+                        f"<!-- ERROR: No cached data for tool '{tool_name}' -->")
+                else:
+                    raw_data = self.data_cache[tool_name]
+                    description = reg["description"]
+                    filtered = raw_data
+                    if 'period начинается со слова "month"' in description:
+                        filtered = [r for r in filtered
+                                    if r.get("period", "").lower().startswith("month")]
+                    elif "forecast" in description and "eac" in description:
+                        filtered = [r for r in filtered
+                                    if r.get("scenario", "").strip() not in ("", "actual")]
+                    if filter_rules:
+                        temp_filtered = []
+                        for row in filtered:
+                            match = True
+                            for key, value in filter_rules.items():
+                                row_val = str(row.get(key, ""))
+                                if isinstance(value, dict):
+                                    continue
+                                if isinstance(value, list):
+                                    if not any(fnmatch.fnmatch(row_val, str(v))
+                                               for v in value):
+                                        match = False
+                                        break
+                                elif isinstance(value, str) and "*" in value:
+                                    if not fnmatch.fnmatch(row_val, value):
+                                        match = False
+                                        break
+                                else:
+                                    if row_val.lower() != str(value).lower():
+                                        match = False
+                                        break
+                            if match:
+                                temp_filtered.append(row)
+                        filtered = temp_filtered
+                    descriptor = {
+                        "widget_type": reg["widget_type"],
+                        "intent": intent_name,
+                        "title": title or "Chart",
+                        "config": reg["config"],
+                        "data_rows": filtered}
+                    echarts_json = render_widget(descriptor)
+                    if echarts_json:
+                        result_parts.append(
+                            f"```json\n{json.dumps(echarts_json, ensure_ascii=False, indent=2)}\n```")
+                    else:
+                        result_parts.append(
+                            f"<!-- ERROR: render_widget returned None for "
+                            f"{intent_name}. Filter was: {filter_rules} -->")
+            except Exception as e:
+                result_parts.append(
+                    f"<!-- SYSTEM{inner_text}--> [WIDGET PARSER ERROR: {e}]")
+            last_end = end_idx + len(end_marker)
+            start_idx = final_answer.find(start_marker, last_end)
+        result_parts.append(final_answer[last_end:])
+        return "".join(result_parts)
+
+    def _check_widgets_data_presence(self, final_answer: str) -> List[Dict[str, Any]]:
+        """ Проверяет, что для каждого плейсхолдера <!-- SYSTEM_WIDGET -->
+        в Final Answer есть данные в data_cache (т.е. питающий инструмент
+        был вызван).
+        Возвращает список описаний отсутствующих данных:
+            [{
+                "intent": "evm_curves",
+                "tool_name": "calculate_evm",
+                "title": "..."
+            }, ...]
+        Пустой список = все виджеты обеспечены данными """
+        registry = self._build_intent_registry()
+        missing: List[Dict[str, Any]] = []
+        # Ищем все плейсхолдеры <!-- SYSTEM_WIDGET: ... | FILTER: ... | TITLE: ... -->
+        # (упрощённый парсинг - только intent и title)
+        pattern = re.compile(
+            r"<!--\s*SYSTEM_WIDGET\s*:\s*(?P<intent>[^|]+?)\s*\|\s*"
+            r"FILTER:\s*(?P<filter>[^|]+?)\s*\|\s*"
+            r"TITLE:\s*(?P<title>.*?)\s*-->",
+            re.DOTALL)
+        for m in pattern.finditer(final_answer):
+            intent_name = m.group("intent").strip()
+            # Нормализация (как в _render_system_widgets)
+            intent_name = intent_name.replace("_ ", "_").replace(" _", "_")
+            if intent_name not in registry:
+                # Fuzzy-матчинг на опечатки - берём ближайший
+                from difflib import get_close_matches
+                matches = get_close_matches(
+                    intent_name, list(registry.keys()), n=1, cutoff=0.7)
+                if matches:
+                    intent_name = matches[0]
+                else:
+                    continue  # Неизвестный intent пропустим, рендер сам сообщит
+            reg = registry[intent_name]
+            # Особые виджеты (action_card) через плейсхолдер - это ошибка формата,
+            # но не наша забота сейчас, пропускаем
+            if reg["widget_type"] in ("action_card", "ActionCard"):
+                continue
+            tool_name = reg["tool_name"]
+            if not tool_name or tool_name not in self.data_cache:
+                missing.append({
+                    "intent": intent_name,
+                    "tool_name": tool_name or "(не определён)",
+                    "title": m.group("title").strip()})
+        return missing
+
+    def _strip_invalid_widget_placeholders(self, text: str) -> str:
+        """ Удаляет из Final Answer плейсхолдеры <!-- SYSTEM_WIDGET -->,
+        которые не удалось отрендерить (неизвестный intent, нет данных и т.д.).
+        Также вычищает HTML-комментарии-ошибки вида
+        `<!-- ERROR: ... -->` и `<!-- Widget '...' опущен: ... -->`.
+        Это робастная страховка: если модель вставила плейсхолдер с именем
+        инструмента вместо intent-а (например, `get_ncr_status` вместо
+        `schedule_variance_by_phase`), или если концентратор явно решил
+        «без виджетов», но модель всё равно вставила плейсхолдер - пользователь
+        не должен видеть технические ошибки """
+        # Удаляем плейсхолдеры SYSTEM_WIDGET с неизвестными/невалидными intent-ами.
+        # Парсим вручную (как в _render_system_widgets), проверяем по реестру
+        registry = self._build_intent_registry()
+        result_parts: List[str] = []
+        last_end = 0
+        start_marker = "<!-- SYSTEM"
+        end_marker = "-->"
+        start_idx = text.find(start_marker)
+        while start_idx != -1:
+            end_idx = text.find(end_marker, start_idx)
+            if end_idx == -1:
+                break
+            inner = text[start_idx + len(start_marker): end_idx]
+            inner_norm = inner.replace("_ ", "_").replace(" _", "_")
+            # Извлекаем intent
+            intent_name = ""
+            filter_idx = inner_norm.find("| FILTER:")
+            if filter_idx != -1:
+                intent_part = inner_norm[:filter_idx].strip()
+                if ":" in intent_part:
+                    intent_name = intent_part.split(":")[-1].strip()
+                else:
+                    intent_name = intent_part.strip()
+            # Проверяем: известен ли intent?
+            is_known = intent_name in registry
+            if not is_known and intent_name:
+                from difflib import get_close_matches
+                matches = get_close_matches(
+                    intent_name, list(registry.keys()), n=1, cutoff=0.7)
+                if matches:
+                    is_known = True
+            if is_known:
+                # Оставляем - пусть _render_system_widgets обработает
+                result_parts.append(text[last_end:start_idx])
+                result_parts.append(text[start_idx:end_idx + len(end_marker)])
+                last_end = end_idx + len(end_marker)
+            else:
+                # Неизвестный intent - вырезаем целиком, оставляем пустое место
+                print(f"[CLEANUP] Вырезан невалидный плейсхолдер виджета: "
+                      f"intent='{intent_name}'")
+                result_parts.append(text[last_end:start_idx])
+                last_end = end_idx + len(end_marker)
+            start_idx = text.find(start_marker, last_end)
+        result_parts.append(text[last_end:])
+        text = "".join(result_parts)
+        # Вычищаем ERROR-комментарии, которые мог оставить _render_system_widgets
+        text = re.sub(
+            r"<!--\s*ERROR:[^>]*?-->\s*",
+            "",
+            text,
+            flags=re.DOTALL)
+        # Вычищаем «Widget '...' опущен»-комментарии
+        text = re.sub(
+            r"<!--\s*Widget\s+'[^']*'\s+опущен:[^>]*?-->\s*",
+            "",
+            text,
+            flags=re.DOTALL)
+        # Убираем лишние пустые строки, которые могли появиться
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        return text.strip()
+
+    def _postprocess_final_answer(self, text: str) -> str:
+        """ Общая постобработка Final Answer для обоих режимов:
+        1) рендер системных плейсхолдеров в ECharts JSON,
+        2) раскрытие JSON-дескрипторов модельных виджетов (action_card),
+        3) вычистка невалидных/ошибочных плейсхолдеров (робастная страховка) """
+        text = self._render_system_widgets(text)
+        text = expand_widget_descriptors(text, render_widget)
+        text = self._strip_invalid_widget_placeholders(text)
+        return text
+
+    def _build_react_prompt_history(
         self,
         query: str,
         active_tools: List[Dict[str, Any]],
         active_plugin_names: List[str],
-        ctx: ConcentratedContext) -> str:
-        """ ReAct-промпт на основе концентрированного контекста.
-        Список active_tools больше выводится в промпт здесь.
-        LLM получает инструменты и правила их применения только через
-        концентрат (ctx.concentrated_knowledge + ctx.plan + ctx.planned_tools) """
+        ctx) -> str:
+        """ ReAct-промпт для history-режима на основе концентрированного контекста """
+        from concentrator import SkillConcentrator, is_special_widget
+
         plugins_str = ", ".join(active_plugin_names)
-        # Секция запланированных виджетов: системные и модельные
         system_widgets, model_widgets = SkillConcentrator.split_widgets_by_type(
             ctx.planned_widgets)
-        # Системные виджеты (BarChart/LineChart/ScatterChart и тд) -> placeholder
+
+        # Системные виджеты
         if system_widgets:
             sys_lines = []
             for w in system_widgets:
@@ -418,19 +625,23 @@ class PmIqAgent:
                 "НЕ генерируйте для них JSON с data_rows!\n\n"
                 "ВАЖНО: Final Answer НЕ должен состоять только из плейсхолдера виджета. "
                 "Сначала дайте текстовый ответ пользователю (анализ данных, конкретные "
-                "выводы с именами/числами из Observation), затем — плейсхолдер виджета. "
-                "Пример:\n"
-                "  Final Answer: По данным о загрузке, взять новую задачу без перегрузки "
-                "могут: Sidorov B. (доступная мощность 20%) и Frolov B. (20%). "
-                "Остальные перегружены (Simonova A. -20%, Team_1 -10%).\n"
-                "  <!-- SYSTEM_WIDGET: availability_gap | FILTER: {} | TITLE: Доступная мощность по ресурсам -->\n\n"
+                "выводы с именами/числами из Observation), затем — плейсхолдер виджета.\n\n"
                 + "\n\n".join(sys_lines))
         else:
+            # Если концентратор явно решил, что виджетов нет,
+            # не показываем модели каталог доступных intents и не просим её
+            # выбирать виджет. Финальный ответ должен быть только текстовым.
+            # Если модель всё же вставит плейсхолдер - он будет вычищен
+            # постобработкой
             system_widgets_section = (
-                "(Нет запланированных системных виджетов. Если нужен график — "
-                "выберите intent из реестра и вставьте плейсхолдер.)")
-        # Модельные виджеты (action_card и др.) -> полный JSON в Final Answer
-        # Разбиваем на REQUIRED (LLM-концентратор выбрала) и AVAILABLE (force-included)
+                "Концентратор знаний не запланировал ни одного виджета для этого "
+                "вопроса. Финальный ответ должен быть **только текстовым** — "
+                "БЕЗ плейсхолдеров `<!-- SYSTEM_WIDGET -->` и БЕЗ JSON-блоков "
+                "`action_card`. Дайте развёрнутый текстовый ответ пользователю "
+                "с анализом данных, конкретными выводами (имена/числа из "
+                "Observation) и рекомендациями.")
+
+        # Модельные виджеты
         if model_widgets:
             required_mw = [w for w in model_widgets if w.get("required", True)]
             available_mw = [w for w in model_widgets if not w.get("required", True)]
@@ -444,11 +655,9 @@ class PmIqAgent:
                         "- Config (ДОСЛОВНО):\n"
                         f"{json.dumps(config, ensure_ascii=False, indent=2)}")
                 else:
-                    # config пустой - это fallback-режим, полный YAML в skills_content
                     config_line = (
-                        "- Config: см. в ЗНАНИЯХ выше "
-                        "(YAML-блок available_widgets скилла "
-                        f"{skill}). Найдите по имени intent '{w.get('intent', '')}'.")
+                        f"- Config: см. в ЗНАНИЯХ выше (YAML-блок available_widgets "
+                        f"скилла {skill}). Найдите по имени intent '{w.get('intent', '')}'.")
                 return (
                     f"##### Intent: {w['intent']} (тип: {w['widget_type']})\n"
                     f"- Описание (для чего): {desc}\n"
@@ -457,9 +666,8 @@ class PmIqAgent:
                     f"- Обоснование: {w.get('rationale', '')}\n"
                     f"{config_line}")
 
-            parts = []
-            parts.append(
-                "Эти виджеты ТРЕБУЮТ LLM-генерации содержимого (message, button и прочее согласно описания).\n"
+            parts = [(
+                "Эти виджеты ТРЕБУЮТ LLM-генерации содержимого (message, button и прочее).\n"
                 "ИХ НЕЛЬЗЯ рендерить через <!-- SYSTEM_WIDGET --> placeholder!\n"
                 "В Final Answer сгенерируйте полный JSON-блок ОБЯЗАТЕЛЬНО обёрнутый\n"
                 "в ```json ... ``` ограждения.\n\n"
@@ -478,53 +686,30 @@ class PmIqAgent:
                 "1. Каждый JSON-блок ОБЯЗАТЕЛЬНО оборачивайте в ```json ... ```.\n"
                 "2. Final Answer НЕ должен состоять только из JSON-блоков. Сначала\n"
                 "   дайте текстовый ответ пользователю (анализ данных, выводы),\n"
-                "   затем — JSON-блоки виджетов. Пример:\n"
-                "   Final Answer: Найдены 2 активных риска с высоким воздействием:\n"
-                "   - R-1: Server delivery delay (risk_score=9, владелец Hubbin I.I.)...\n"
-                "   - R-2: Staff shortage (risk_score=9, владелец Sergo P.P.)...\n"
-                "   ```json\n{ ... action_card для R-1 ... }\n```\n"
-                "   ```json\n{ ... action_card для R-2 ... }\n```\n"
-                "3. ПОЛЕ message ДОЛЖНО БЫТЬ УНИКАЛЬНЫМ для каждого виджета.\n"
-                "   НЕ копируйте message из одного виджета в другой. Каждый action_card\n"
-                "   описывает КОНКРЕТНЫЙ объект — text должен отражать именно его.\n"
-                "   Например, для риска 'Staff shortage' message про 'резервного поставщика'\n"
-                "   БЕССМЫСЛЕНЕН — нужно писать про резервный персонал/найм."
-            )
-
-            # REQUIRED - LLM-концентратор сочла релевантными вопросу
+                "   затем — JSON-блоки виджетов.\n"
+                "3. ПОЛЕ message ДОЛЖНО БЫТЬ УНИКАЛЬНЫМ для каждого виджета."
+            )]
             if required_mw:
                 req_lines = [render_widget_block(w) for w in required_mw]
-                parts.append(
-                    "### ОБЯЗАТЕЛЬНО СГЕНЕРИРОВАТЬ\n"
-                    "Сгенерируйте ВСЕ эти виджеты в Final Answer:\n\n"
-                    + "\n\n".join(req_lines))
-
-            # AVAILABLE - force-included, LLM решает по description
+                parts.append("### ОБЯЗАТЕЛЬНО СГЕНЕРИРОВАТЬ\n"
+                             + "\n\n".join(req_lines))
             if available_mw:
                 avail_lines = [render_widget_block(w) for w in available_mw]
-                parts.append(
-                    "### ДОСТУПНО (сгенерируйте если релевантные вопросу)\n"
-                    "Прочитайте Описание каждого и решите, какие релевантны вопросу.\n"
-                    "Сгенерируйте в Final Answer только те, что реально подходят.\n"
-                    "Если вопрос требует плана действий/реагирования — сгенерируйте\n"
-                    "хотя бы один подходящий action_card.\n\n"
-                    + "\n\n".join(avail_lines))
-
+                parts.append("### ДОСТУПНО (сгенерируйте если релевантные вопросу)\n"
+                             + "\n\n".join(avail_lines))
             model_widgets_section = "\n\n".join(parts)
         else:
             model_widgets_section = "(Нет запланированных модельных виджетов.)"
 
         plan_section = ctx.plan if ctx.plan else "(Предплана нет. Анализируйте с нуля.)"
-
-        # Подсказка по запланированным инструментам
         planned_tools_hint = ""
         if ctx.planned_tools:
             planned_tools_hint = (
-                f"\nПРЕДЛАГАЕМЫЙ ПОРЯДОК ИНСТРУМЕНТОВ (отклоняйтесь только с обоснованием в Thought): "
-                f"{' -> '.join(ctx.planned_tools)}")
-
+                f"\nПРЕДЛАГАЕМЫЙ ПОРЯДОК ИНСТРУМЕНТОВ (отклоняйтесь только с "
+                f"обоснованием в Thought): {' -> '.join(ctx.planned_tools)}")
         knowledge_section = ctx.concentrated_knowledge if ctx.concentrated_knowledge else (
-            "(Концентрированных знаний нет. Опирайтесь на инструменты и общие принципы PMBOK 8.)")
+            "(Концентрированных знаний нет. Опирайтесь на инструменты и общие "
+            "принципы PMBOK 8.)")
 
         return f"""**КРИТИЧЕСКОЕ ПРЕДУПРЕЖДЕНИЕ: Вы работаете с РЕАЛЬНЫМИ данными из корпоративных систем (Jira, SAP, Workday и т.п.).**
 **НИКОГДА не выдумывайте, не изменяйте данные. Используйте ТОЛЬКО данные, предоставленные в Observation.**
@@ -553,420 +738,45 @@ class PmIqAgent:
 КРИТИЧЕСКИ ВАЖНЫЕ ПРАВИЛА:
 
 1. **ЦЕЛОСТНОСТЬ ДАННЫХ:**
-   - Observation содержит JSON с основным полем `data` — это Markdown-таблица с фактической информацией.
-   - Используйте ТОЛЬКО данные из поля `data`. НИКОГДА не выдумывайте имена, числа или факты.
-   - **МАППИНГ СУЩНОСТЕЙ:** пользователи называют сущности разговорно ("Перенос 1С", "Стройка"). Сопоставляйте их с точными системными именами из `project_name`, `wbs_name`, `resource_name`.
-   - В Final Answer и в `data_rows` виджетов ВСЕГДА используйте ТОЛЬКО точные системные имена из таблицы `data`.
-   - Парсите Markdown-таблицу внимательно: каждая строка после разделителя — отдельная запись.
-   - **ИМЕНА ИНСТРУМЕНТОВ:** вызывайте ТОЛЬКО инструменты, упомянутые в ЗНАНИЯХ, ПЛАНЕ или ПРЕДЛАГАЕМОМ ПОРЯДКЕ ИНСТРУМЕНТОВ выше. НИКОГДА не используйте имена навыков (Skills) в качестве Action. НИКОГДА не выдумывайте инструменты — если имя не упомянуто в плане/концентрате, его нельзя вызывать.
-   - **СИНТАКСИС ФИЛЬТРОВ:** в плейсхолдере `FILTER: {{}}` передавайте ТОЛЬКО простые значения (строки) или массивы строк `["A", "B"]`. ЗАПРЕЩЕНО `{{"$regex": "..."}}` или `{{"$gt": 10}}`.
+   - Observation содержит JSON с основным полем `data` — это Markdown-таблица.
+   - Используйте ТОЛЬКО данные из поля `data`. НИКОГДА не выдумывайте имена/числа.
+   - **МАППИНГ СУЩНОСТЕЙ:** сопоставляйте разговорные названия с точными системными именами.
+   - В Final Answer и в `data_rows` виджетов ВСЕГДА используйте ТОЛЬКО точные системные имена.
+   - **ИМЕНА ИНСТРУМЕНТОВ:** вызывайте ТОЛЬКО инструменты, упомянутые в ЗНАНИЯХ, ПЛАНЕ или ПРЕДЛАГАЕМОМ ПОРЯДКЕ.
+   - **СИНТАКСИС ФИЛЬТРОВ:** в плейсхолдере `FILTER: {{}}` передавайте ТОЛЬКО простые значения или массивы строк. ЗАПРЕЩЕНО `{{"$regex": "..."}}` или `{{"$gt": 10}}`.
 
-2. **ОТОБРАЖЕНИЕ ВИДЖЕТОВ (КРИТИЧНО — ПРОЧТИ ДВАЖДЫ):**
-
+2. **ОТОБРАЖЕНИЕ ВИДЖЕТОВ:**
    **ВИДЖЕТЫ — ЭТО НЕ ИНСТРУМЕНТЫ. Их нельзя вызывать через `Action:`.**
-   Плейсхолдеры `<!-- SYSTEM_WIDGET -->` и JSON-блоки виджетов появляются **ТОЛЬКО ВНУТРИ Final Answer** — прямо в тексте ответа пользователя.
+   **ВИДЖЕТ ТИП А: СИСТЕМНЫЕ ВИДЖЕТЫ** — вставляйте плейсхолдер:
+   <!-- SYSTEM_WIDGET: имя_intent | FILTER: {{"key": "value"}} | TITLE: Заголовок -->
+   Где `имя_intent` — это ИМЯ INTENT-а из секций ЗАПЛАНИРОВАННЫЕ ВИДЖЕТЫ выше
+   (например `risk_matrix_priority`, `evm_curves`, `cpi_spi_trend`).
+   **ИМЯ INTENT-А — НЕ ИМЯ ИНСТРУМЕНТА!** Не подставляйте в плейсхолдер имена
+   вроде `get_risk_register`, `calculate_evm`, `get_ncr_status` — это инструменты,
+   а не виджеты. Если сомневаетесь — НЕ вставляйте плейсхолдер, дайте только текст.
+   **ВИДЖЕТ ТИП Б: МОДЕЛЬНЫЕ ВИДЖЕТЫ (action_card)** — генерируйте полный JSON в Final Answer.
 
-   **ВИДЖЕТ ТИП А: СИСТЕМНЫЕ ВИДЖЕТЫ (LineChart, BarChart, ScatterChart и т.д.)**
-   Эти виджеты отображают данные из таблиц `data`. НЕ генерируйте для них JSON с data_rows!
-   1. ВЫБЕРИТЕ один intent из запланированных выше (или из реестра, если план неполный).
-   2. Вставьте ОДИН плейсхолдер **прямо в текст Final Answer** строго в формате:
-      <!-- SYSTEM_WIDGET: имя_intent | FILTER: {{"ключ_из_data": "значение"}} | TITLE: Ваш контекстный заголовок -->
-   3. В FILTER передавайте JSON с параметрами для фильтрации строк из таблицы. Пустой фильтр `FILTER: {{}}` = все строки.
+3. **ПРОВЕРКА ФАКТОВ:** перед Final Answer проверьте каждое имя и число по `data`.
 
-   **ВИДЖЕТ ТИП Б: ВИДЖЕТЫ МОДЕЛИ (action_card и кастомные)**
-   1. Для `action_card` генерируйте ПОЛНЫЙ JSON-блок **внутри Final Answer**. Поле "data_rows" = [].
-   2. Если сами рассчитали данные, можно сгенерировать виджет ПОЛНОСТЬЮ. `widget_type` = тип диаграммы (не имя intent).
-
-   **ОБЩИЕ ПРАВИЛА:**
-   - ЗАПРЕЩЕНО генерировать виджеты "по памяти" или придумывать названия intent-ов.
-   - Если запрос затрагивает несколько аспектов, включайте ВСЕ релевантные виджеты в Final Answer.
-   - ЗАПРЕЩЕНО писать `Action: <!-- SYSTEM_WIDGET ... -->`. Это частая ошибка. Виджет — НЕ инструмент.
-
-3. **ПРОВЕРКА ФАКТОВ:**
-   - Перед Final Answer проверьте каждое имя и число по полю `data` в Observation.
-   - Если имени НЕТ в `data`, НЕ упоминайте его в ответе.
-
-4. **ЛОГИКА РАБОТЫ (ИЗБЕГАТЬ ЗАЦИКЛИВАНИЯ — КРИТИЧНО):**
-   Вы работаете в цикле: Thought -> Action -> Observation -> ... -> Final Answer
+4. **ЛОГИКА РАБОТЫ (ИЗБЕГАТЬ ЗАЦИКЛИВАНИЯ):**
    - В КАЖДОМ ответе ТОЛЬКО ОДИН блок: либо `Thought + Action + Action Input`, либо `Thought + Final Answer`.
-   - **НИКОГДА не пишите несколько Action в одном ответе.** Вызывайте инструменты ПО ОДНОМУ.
-   - НЕ ПИШИТЕ "Question:" в начале ответа.
-   - **СТРОЖАЙШЕ ЗАПРЕЩЕНО писать "Observation:" самому.** Observation предоставляет ТОЛЬКО система после выполнения Action. ВАШ ответ ВСЕГДА должен начинаться с "Thought:" и заканчиваться либо "Action:", либо "Final Answer:".
-   - После Observation (от системы):
-     * данных НЕДОСТАТОЧНО -> новый Thought + **ДРУГОЙ** инструмент (не тот же самый!)
-     * данных ДОСТАТОЧНО -> `Thought: я теперь знаю финальный ответ` + Final Answer
    - **ЗАПРЕЩЕНО вызывать один инструмент с теми же аргументами более одного раза подряд.**
-     Если вы уже получили данные от `calculate_evm {{}}`, НЕ ВЫЗЫВАЙТЕ `calculate_evm {{}}` снова —
-     данные не изменятся. Переходите к СЛЕДУЮЩЕМУ инструменту из плана или к Final Answer.
-   - **ПРИМЕР правильного перехода** (после получения Observation от calculate_evm):
-     ```
-     Thought: Из данных видно: 1C_Migration имеет CPI < 1.0 в Months 2-4 (0.88, 0.86, 0.86) —
-     3 периода подряд = системная проблема. Pool_Phase1: CPI 1.04 -> 0.96 -> 0.95 —
-     тренд к ухудшению. Local_App: CPI > 1.1 — эффективно. Теперь нужен EAC прогноз —
-     вызову get_okr_alignment.
-     Action: get_okr_alignment
-     Action Input: {{}}
-     ```
-   - **НЕПРАВИЛЬНО** (зацикливание):
-     ```
-     Thought: Теперь проверю наличие трёх подряд периодов с CPI < 1.0...
-     Action: calculate_evm       <- ЗАПРЕЩЕНО, уже вызывался!
-     Action Input: {{}}
-     ```
+   - После Observation: данных недостаточно → новый Thought + ДРУГОЙ инструмент; данных достаточно → Final Answer.
 
-5. **ОТКЛОНЕНИЕ ОТ ПЛАНА:**
-   - План выше — это рекомендация. Если Observation противоречит плану, ОТКЛОНЯЙТЕСЬ, но объясните в Thought.
-   - Если запланированный виджет оказывается нерелевантным после получения данных, не выводите его.
+5. **ОТКЛОНЕНИЕ ОТ ПЛАНА:** если Observation противоречит плану, ОТКЛОНЯЙТЕСЬ, но объясните в Thought.
 
-6. **МНОЖЕСТВЕННЫЕ АСПЕКТЫ:**
-   - Если запрос упоминает НЕСКОЛЬКО аспектов, вызовите инструменты из ВСЕХ релевантных доменов.
+6. **МНОЖЕСТВЕННЫЕ АСПЕКТЫ:** вызовите инструменты из ВСЕХ релевантных доменов.
 
-7. **ВЫХОД ИЗ ТУПИКА:**
-   - Если инструмент не найден или Observation содержит "error", сразу выдавайте Final Answer с объяснением.
+7. **ВЫХОД ИЗ ТУПИКА:** при ошибке сразу выдавайте Final Answer с объяснением.
 
-8. **ПРАВИЛЬНЫЙ ПЕРЕХОД К FINAL ANSWER С ВИДЖЕТОМ (пример):**
-
-   После получения Observation:
-   ```
-   Thought: Я получил все нужные данные о загрузке. Могу ответить на вопрос с диаграммой.
-   Final Answer: Перегружен сотрудник: Frolov A. (120%). Он — Middle Dev. Остальные — в норме.
-   <!-- SYSTEM_WIDGET: overload_by_person | FILTER: {{}} | TITLE: Загрузка команды разработки -->
-   ```
-
-   **НЕПРАВИЛЬНО (виджет как Action — ЗАПРЕЩЕНО):**
-   ```
-   Thought: ...
-   Action: <!-- SYSTEM_WIDGET: overload_by_person | FILTER: {{}} | TITLE: ... -->
-   ```
-
-**СТРОГОЕ ПРАВИЛО ЯЗЫКА:**
-В шагах 'Thought:' разрешается думать на английском.
-Однако 'Final Answer:' ДОЛЖЕН быть на ТОМ ЖЕ языке, на котором задан вопрос пользователя.
+**СТРОГОЕ ПРАВИЛО ЯЗЫКА:** Final Answer на ТОМ ЖЕ языке, на котором задан вопрос.
 
 Начните!
 
 Вопрос пользователя: {query}"""
 
-    # Парсер ответа LLM (ReAct)
-    def _parse_llm_response(self, text: str) -> Dict[str, str]:
-        """ Парсит ответ LLM без использования регулярок, на базе стейт-машины """
-        lines = text.split('\n')
-        if lines and lines[0].strip().lower().startswith('question:'):
-            lines = lines[1:]
-            text = '\n'.join(lines)
-        thought_parts = []
-        action = ""
-        action_input_parts = []
-        state = 'none'
-        for line in lines:
-            stripped = line.strip()
-            if not stripped and state != 'action_input':
-                continue
-            lower = stripped.lower()
-            # FINAL ANSWER - абсолютный приоритет
-            if lower.startswith("final answer:") or lower.startswith("final answer :"):
-                idx = text.lower().find("final answer")
-                if idx != -1:
-                    colon_idx = text.find(":", idx)
-                    answer_text = text[colon_idx + 1:].strip() if colon_idx != -1 else text[idx + len("final answer"):].strip()
-                else:
-                    answer_text = stripped
-                return {"type": "final_answer", "answer": answer_text}
-            if state == 'action_input':
-                if lower.startswith("action:") or lower.startswith("action input:"):
-                    continue
-                action_input_parts.append(stripped)
-                continue
-            if lower.startswith("observation:"):
-                if action:
-                    return {"type": "action",
-                            "thought": "\n".join(thought_parts).strip(),
-                            "action": action.strip(),
-                            "action_input": "\n".join(action_input_parts).strip()}
-                else:
-                    # LLM сгаллюцинировала Observation без Action - это нарушение ReAct.
-                    # Возвращаем отдельный тип, чтобы run() мог вставить user-сообщение
-                    return {"type": "hallucinated_observation",
-                        "text": text,}
-            if lower.startswith("action input:") or lower.startswith("action input :"):
-                state = 'action_input'
-                parts = stripped.split(":", 1)
-                if len(parts) > 1 and parts[1].strip():
-                    action_input_parts.append(parts[1].strip())
-                continue
-            if lower.startswith("action:") or lower.startswith("action :") or lower == "action":
-                if state != 'action':
-                    state = 'action'
-                    parts = stripped.split(":", 1)
-                    if len(parts) > 1 and parts[1].strip():
-                        candidate = parts[1].strip()
-                        # ДЕТЕКЦИЯ ПЛЕЙСХОЛДЕРА-В-ACTION:
-                        # LLM иногда путается и пишет виджет как Action.
-                        # Это значит, что она хотела выдать Final Answer.
-                        # Конвертируем весь накопленный Thought + сам плейсхолдер
-                        # в Final Answer, чтобы пройти к рендерингу виджетов
-                        if (candidate.startswith("<!--")
-                                or candidate.startswith("SYSTEM_WIDGET")
-                                or "<!-- SYSTEM_WIDGET" in text):
-                            print("[PARSER] Action содержит <!-- SYSTEM_WIDGET — "
-                                  "конвертирую в Final Answer")
-                            # Собираем Final Answer из Thought + всего текста Action
-                            fa_parts = []
-                            if thought_parts:
-                                fa_parts.append("\n".join(thought_parts).strip())
-                            fa_parts.append(candidate)
-                            # Если ниже есть ещё строки (Action Input и т.д.) -
-                            # они уже в тексте, найдём их через срез текста
-                            full_action_text = text[text.find("Action:"):]
-                            # Если в полном тексте ответа есть SYSTEM_WIDGET,
-                            # возьмём его целиком - там могут быть плейсхолдеры
-                            if "<!-- SYSTEM_WIDGET" in full_action_text:
-                                # Берём от первого Thought до конца
-                                thought_idx = text.lower().find("thought:")
-                                if thought_idx != -1:
-                                    raw_answer = text[thought_idx:].strip()
-                                    # Вычищаем служебные префиксы ReAct:
-                                    # "Thought: ...", "Action: ...", "Action Input: ..."
-                                    # Оставляем только содержательные даанные
-                                    cleaned_lines = []
-                                    for line in raw_answer.split("\n"):
-                                        ls = line.strip()
-                                        ll = ls.lower()
-                                        if ll.startswith("thought:"):
-                                            content = ls[len("thought:"):].strip()
-                                            if content:
-                                                cleaned_lines.append(content)
-                                        elif ll.startswith("action:"):
-                                            content = ls[len("action:"):].strip()
-                                            if content:
-                                                cleaned_lines.append(content)
-                                        elif ll.startswith("action input:"):
-                                            # Пропускаем, это служебное
-                                            continue
-                                        else:
-                                            cleaned_lines.append(line)
-                                    cleaned_answer = "\n".join(cleaned_lines).strip()
-                                    return {"type": "final_answer",
-                                        "answer": cleaned_answer}
-                            return {"type": "final_answer",
-                                "answer": "\n\n".join(fa_parts).strip()}
-                        action = candidate.split()[0]
-                continue
-            if lower.startswith("thought:") or lower.startswith("thought :") or lower == "thought":
-                state = 'thought'
-                parts = stripped.split(":", 1)
-                if len(parts) > 1 and parts[1].strip():
-                    thought_parts.append(parts[1].strip())
-                continue
-            if state == 'thought':
-                thought_parts.append(stripped)
-            elif state == 'action':
-                if not action:
-                    action = stripped.split()[0]
-            elif state == 'action_input':
-                action_input_parts.append(stripped)
-        if action:
-            return {"type": "action",
-                    "thought": "\n".join(thought_parts).strip(),
-                    "action": action.strip(),
-                    "action_input": "\n".join(action_input_parts).strip()}
-        return {"type": "thought", "text": text}
-
-    def _detect_loop(self, history: List[Dict], threshold: int = 3) -> bool:
-        """ Обнаруживает зацикливание ReAct. Два критерия:
-        1. Последние N Thought-сообщений похожи (старый критерий, первые 100 символов).
-        2. Последние N assistant-сообщений содержат ОДИНАКОВЫЙ Action + Action Input """
-        if len(history) < threshold * 2:
-            return False
-        recent_assistant_msgs = [
-            msg["content"] for msg in history[-threshold*2:]
-            if msg["role"] == "assistant"][-threshold:]
-        if len(recent_assistant_msgs) < threshold:
-            return False
-        # Критерий 1: похожие первые 100 символов 
-        first_msg_prefix = recent_assistant_msgs[0][:100]
-        similar_count = sum(1 for msg in recent_assistant_msgs if msg[:100] == first_msg_prefix)
-        if similar_count >= threshold:
-            return True
-        # Критерий 2: одинаковый Action + Action Input в последних N сообщениях
-        def extract_action_sig(msg: str) -> str:
-            """ Извлекает 'Action: X | Action Input: Y' из сообщения """
-            action = ""
-            action_input = ""
-            for line in msg.split("\n"):
-                ls = line.strip().lower()
-                if ls.startswith("action:") and not action:
-                    parts = line.strip().split(":", 1)
-                    if len(parts) > 1:
-                        action = parts[1].strip().split()[0] if parts[1].strip() else ""
-                elif ls.startswith("action input:") and not action_input:
-                    parts = line.strip().split(":", 1)
-                    if len(parts) > 1:
-                        action_input = parts[1].strip()
-            return f"{action}||{action_input}"
-
-        sigs = [extract_action_sig(msg) for msg in recent_assistant_msgs]
-        # Если все сигнатуры непустые и одинаковые, то это зацикливание
-        if all(s for s in sigs) and len(set(sigs)) == 1:
-            print(f"[LOOP-DETECT] Обнаружено зацикливание на Action: {sigs[0]}")
-            return True
-
-        return False
-
-    def _detect_hallucinations(self, final_answer: str, observations: List[str]) -> List[str]:
-        """ Это очень наивная версия, суть заглушка.
-        Сейчас - проверяет, не выдумала ли LLM имена, которых нет в данных """
-        mentioned_names = set(re.findall(r'\b([А-ЯA-Z][а-яa-z]+\s+[А-ЯA-Z]\.)\b', final_answer))
-        data_names = set()
-        for obs in observations:
-            data_names.update(re.findall(r'\b([А-ЯA-Z][а-яa-z]+\s+[А-ЯA-Z]\.)\b', obs))
-        hallucinated = mentioned_names - data_names
-        return list(hallucinated)
-
-    # Рендер системных плейсхолдеров
-    def _render_system_widgets(self, final_answer: str) -> str:
-        """ Находит плейсхолдеры системных виджетов и заменяет их на ECharts JSON """
-        intent_registry = {}
-        for plugin in self.structure.plugins:
-            for skill in plugin.get("skills", []):
-                for widget_def in skill.get("available_widgets", []):
-                    w_type = widget_def.get("type", "")
-                    for intent in widget_def.get("intents", []):
-                        intent_name = intent.get("name")
-                        if intent_name:
-                            tool_name = None
-                            skill_path = skill.get("path")
-                            if skill_path:
-                                csvs = list(skill_path.glob("*.csv"))
-                                if csvs:
-                                    tool_name = csvs[0].stem
-                            intent_registry[intent_name] = {
-                                "widget_type": w_type,
-                                "config": intent.get("config", {}),
-                                "tool_name": tool_name,
-                                "description": intent.get("description", "").lower()}
-        result_parts = []
-        last_end = 0
-        start_marker = "<!-- SYSTEM"
-        end_marker = "-->"
-        start_idx = final_answer.find(start_marker)
-        while start_idx != -1:
-            result_parts.append(final_answer[last_end:start_idx])
-            end_idx = final_answer.find(end_marker, start_idx)
-            if end_idx == -1:
-                break
-            inner_text = final_answer[start_idx + len(start_marker): end_idx]
-            inner_text = inner_text.replace("_ ", "_").replace(" _", "_")
-            try:
-                filter_idx = inner_text.find("| FILTER:")
-                if filter_idx == -1:
-                    raise ValueError("Missing | FILTER: delimiter")
-                intent_part = inner_text[:filter_idx].strip()
-                rest_part = inner_text[filter_idx + len("| FILTER:"):].strip()
-                if ":" in intent_part:
-                    intent_name = intent_part.split(":")[-1].strip()
-                else:
-                    intent_name = intent_part.strip()
-                title_idx = rest_part.find("| TITLE:")
-                if title_idx == -1:
-                    raise ValueError("Missing | TITLE: delimiter")
-                filter_str = rest_part[:title_idx].strip()
-                title = rest_part[title_idx + len("| TITLE:"):].strip()
-                filter_rules = json.loads(filter_str)
-                for key, value in filter_rules.items():
-                    if isinstance(value, str) and "|" in value:
-                        filter_rules[key] = [v.strip() for v in value.split("|")]
-                if intent_name not in intent_registry:
-                    # Fuzzy match - LLM иногда опечатывается в имени intent-а
-                    # (например, availability_ghap вместо availability_gap)
-                    from difflib import get_close_matches
-                    matches = get_close_matches(
-                        intent_name,
-                        list(intent_registry.keys()),
-                        n=1,
-                        cutoff=0.7)
-                    if matches:
-                        correct_name = matches[0]
-                        print(
-                            f"[WIDGET-FUZZY] Intent '{intent_name}' -> '{correct_name}' "
-                            f"(fuzzy match, опечатка LLM)")
-                        intent_name = correct_name
-                    else:
-                        result_parts.append(
-                            f"<!-- ERROR: Unknown intent '{intent_name}'. "
-                            f"Available: {', '.join(intent_registry.keys())} -->")
-                        last_end = end_idx + len(end_marker)
-                        start_idx = final_answer.find(start_marker, last_end)
-                        continue
-                reg = intent_registry[intent_name]
-                # ЗАЩИТА: особые виджеты (action_card и др.) нельзя
-                # рендерить через плейсхолдер, им нужны message/button от LLM
-                if is_special_widget(reg["widget_type"]):
-                    result_parts.append(
-                        f"<!-- ERROR: intent '{intent_name}' имеет тип "
-                        f"'{reg['widget_type']}' — это ОСОБЫЙ виджет. "
-                        f"Его НЕЛЬЗЯ рендерить через <!-- SYSTEM_WIDGET -->. "
-                        f"LLM должна сгенерировать полный JSON-блок с message/button "
-                        f"в Final Answer. -->")
-                    last_end = end_idx + len(end_marker)
-                    start_idx = final_answer.find(start_marker, last_end)
-                    continue
-                tool_name = reg["tool_name"]
-                if not tool_name or tool_name not in self.data_cache:
-                    result_parts.append(f"<!-- ERROR: No cached data for tool '{tool_name}' -->")
-                else:
-                    raw_data = self.data_cache[tool_name]
-                    description = reg["description"]
-                    filtered = raw_data
-                    if 'period начинается со слова "month"' in description:
-                        filtered = [r for r in filtered if r.get("period", "").lower().startswith("month")]
-                    elif 'forecast' in description and 'eac' in description:
-                        filtered = [r for r in filtered if r.get("scenario", "").strip() not in ("", "actual")]
-                    if filter_rules:
-                        temp_filtered = []
-                        for row in filtered:
-                            match = True
-                            for key, value in filter_rules.items():
-                                row_val = str(row.get(key, ""))
-                                if isinstance(value, dict):
-                                    continue
-                                if isinstance(value, list):
-                                    if not any(fnmatch.fnmatch(row_val, str(v)) for v in value):
-                                        match = False
-                                        break
-                                elif isinstance(value, str) and '*' in value:
-                                    if not fnmatch.fnmatch(row_val, value):
-                                        match = False
-                                        break
-                                else:
-                                    if row_val.lower() != str(value).lower():
-                                        match = False
-                                        break
-                            if match:
-                                temp_filtered.append(row)
-                        filtered = temp_filtered
-                    descriptor = {"widget_type": reg["widget_type"],
-                        "intent": intent_name,
-                        "title": title or "Chart",
-                        "config": reg["config"],
-                        "data_rows": filtered}
-                    echarts_json = render_widget(descriptor)
-                    if echarts_json:
-                        result_parts.append(f"```json\n{json.dumps(echarts_json, ensure_ascii=False, indent=2)}\n```")
-                    else:
-                        result_parts.append(
-                            f"<!-- ERROR: render_widget returned None for "
-                            f"{intent_name} (possibly 0 rows after filter, "
-                            f"or config mismatch). Filter was: {filter_rules} -->")
-            except Exception as e:
-                result_parts.append(f"<!-- SYSTEM{inner_text}--> [WIDGET PARSER ERROR: {str(e)}]")
-            last_end = end_idx + len(end_marker)
-            start_idx = final_answer.find(start_marker, last_end)
-        result_parts.append(final_answer[last_end:])
-        return "".join(result_parts)
-
-    async def run(self, query: str, max_iterations: int = 16):
-        # МАРШРУТИЗАЦИЯ
+    async def run_history_loop(self, query: str) -> str:
+        """ ReAct-цикл с накапливаемой историей диалога и концентратором """
         try:
             selected_plugins = await self.route_query(query)
         except Exception as e:
@@ -974,297 +784,873 @@ class PmIqAgent:
             return "Не удалось определить контекст запроса."
         active_tools = [t for t in self.all_tools if t["plugin"] in selected_plugins]
         if not active_tools:
-            print(f"Для выбранных плагинов не найдено инструментов.")
             return "Не удалось найти подходящие инструменты."
-        # КОНЦЕНТРАЦИЯ ЗНАНИЙ
+
         print(f"\n[Concentrator] Концентрация знаний из {len(selected_plugins)} плагинов...")
         ctx = await self.concentrator.concentrate(query, selected_plugins, active_tools)
         if ctx.fallback_used:
-            print("[Concentrator] ВНИМАНИЕ: используется fallback — полный контекст методички")
-        print()
-        # Карты маппинга (Skill -> Tool, Plugin -> Tool) - на случай, если LLM
-        # в ReAct вызовет skill вместо tool
-        skill_to_tool_map = {}
-        plugin_to_tool_map = {}
+            print("[Concentrator] ВНИМАНИЕ: используется fallback — полный контекст")
+
+        # Карты маппинга
+        skill_to_tool_map: Dict[str, str] = {}
+        plugin_to_tool_map: Dict[str, str] = {}
         for tool in active_tools:
-            plugin_name = tool.get("plugin")
-            if plugin_name and plugin_name not in plugin_to_tool_map:
-                plugin_to_tool_map[plugin_name] = tool["name"]
+            pn = tool.get("plugin")
+            if pn and pn not in plugin_to_tool_map:
+                plugin_to_tool_map[pn] = tool["name"]
         for plugin in self.structure.plugins:
             if plugin["name"] in selected_plugins:
                 for skill in plugin.get("skills", []):
-                    skill_name = skill.get("name")
-                    if skill_name:
-                        fallback_tool = next(
-                            (t["name"] for t in active_tools if t["plugin"] == plugin["name"]),
-                            None)
-                        if fallback_tool:
-                            skill_to_tool_map[skill_name] = fallback_tool
-        active_plugin_names = ", ".join(selected_plugins)
-        print(f"\n{'='*80}")
-        print(f"ДАННЫЕ ДЛЯ КОНТРОЛЯ:")
-        print(f"{'='*80}")
-        print(f"Активные плагины: {active_plugin_names}")
-        print(f"Количество инструментов: {len(active_tools)}")
-        for tool in active_tools:
-            print(f"  - {tool['name']} (из плагина: {tool['plugin']})")
-        print(f"{'='*80}\n")
-        # ReAct-цикл
-        # Сбрасываем историю вызовов для нового запроса
+                    sn = skill.get("name")
+                    if sn:
+                        fb = next((t["name"] for t in active_tools
+                                   if t["plugin"] == plugin["name"]), None)
+                        if fb:
+                            skill_to_tool_map[sn] = fb
+
         self._tool_call_history.clear()
         self._tool_call_counts.clear()
+
         try:
-            prompt_text = self._build_react_prompt(
+            prompt_text = self._build_react_prompt_history(
                 query, active_tools, selected_plugins, ctx)
             print(f"[DEBUG] React prompt: {len(prompt_text)} символов")
-            history = [{"role": "user", "content": prompt_text}]
-        except Exception as e:
+            history: List[Dict[str, str]] = [
+                {"role": "user", "content": prompt_text}]
+        except Exception:
             import traceback
-            print("\n[КРИТИЧЕСКАЯ ОШИБКА В _build_react_prompt!]")
             traceback.print_exc()
             return "Ошибка при сборке системного промпта."
-        for iteration in range(max_iterations):
+
+        for iteration in range(_MAX_ITERATIONS_HISTORY):
             print(f"\n[Итерация {iteration + 1}]")
-            if self._detect_loop(history):
+            if detect_loop(history):
                 print("Обнаружено зацикливание LLM. Принудительное завершение.")
                 return "Обнаружено зацикливание LLM. Принудительное завершение"
             try:
-                loop = asyncio.get_event_loop()
-                # ДИНАМИЧЕСКИЙ РАСЧЕТ LIMMITA ДЛЯ ОТВЕТА
-                # CONTEXT_WINDOW_SIZE = 14000
-                # SAFETY_BUFFER = 400 # Оставляем немного места на неточности подсчета токенов
-                # # Быстрая оценка: 1 токен ~ 4 символа для английского, ~2.5 для русского.
-                # # Берем усредненный коэффициент 3.5 для нашего микса
-                # history_chars = sum(len(msg["content"]) for msg in history)
-                # estimated_input_tokens = int(history_chars / 3.5)
-                # remaining_tokens = CONTEXT_WINDOW_SIZE - estimated_input_tokens - SAFETY_BUFFER
-                # if remaining_tokens < 500:
-                #     print("КРИТИЧЕСКОЕ ПРЕДУПРЕЖДЕНИЕ: История почти заполнила контекстное окно. Принудительное завершение.")
-                #     return "История диалога слишком велика для данного окна модели."
-                # dynamic_max_tokens = min(8096, remaining_tokens) # Ограничиваем сверху разумным пределом
-                def sync_llm_call():
-                    return self.llm_client.chat.completions.create(
-                        model=LLM_MODEL_NAME,
-                        messages=history,
-                        temperature=_TEMPERATURE,
-                        max_tokens=_MAX_TOKENS)
-                response = await loop.run_in_executor(None, sync_llm_call)
-                llm_text = response.choices[0].message.content
+                llm_text = await self._call_llm(history)
                 print(f"LLM (полный ответ):\n{llm_text}\n" + "-" * 30)
             except Exception as e:
                 print(f"Ошибка обращения к LLM: {e}")
                 return "Ошибка подключения к LLM."
-            parsed = self._parse_llm_response(llm_text)
+
+            parsed = parse_llm_response(llm_text)
             if parsed["type"] == "action":
-                clean_assistant_msg = (
+                clean_msg = (
                     f"Thought: {parsed.get('thought', '')}\n"
                     f"Action: {parsed['action']}\n"
                     f"Action Input: {parsed['action_input']}")
-                history.append({"role": "assistant", "content": clean_assistant_msg})
-                print(f"\n{'='*60}")
-                print(f"САНИТИЗИРОВАННОЕ СООБЩЕНИЕ ДЛЯ ИСТОРИИ:")
-                print(f"{'='*60}")
-                print(clean_assistant_msg)
-                print(f"{'='*60}\n")
+                history.append({"role": "assistant", "content": clean_msg})
             else:
-                # Для Final Answer / Thought / галлюцинированного Observation
-                # сохраняем assistant-сообщение как есть
                 history.append({"role": "assistant", "content": llm_text})
-            # ОБРАБОТКА ГАЛЛЮЦИНИРОВАННОГО OBSERVATION
-            # LLM написала "Observation:" без вызова Action - нарушение ReAct.
-            # Вставляем user-сообщение с предупреждением, чтобы:
-            #   1) LLM поняла, что Observation приходит от системы, а не от неё
-            #   2) Не было 2 assistant-сообщений подряд
+
             if parsed["type"] == "hallucinated_observation":
-                print("[PARSER] LLM сгаллюцинировала Observation без Action. "
-                      "Вставляю user-сообщение-предупреждение.")
-                warning_msg = (
-                    "ОШИБКА: вы написали 'Observation:' без предшествующего 'Action:'. "
-                    "Это нарушение формата ReAct. Observation предоставляет ТОЛЬКО система "
-                    "после выполнения Action. ВЫ НЕ ДОЛЖНЫ писать Observation сами.\n\n"
-                    "Пожалуйста, начните с 'Thought:' и вызовите инструмент через 'Action:'. "
-                    "Или, если данных достаточно, выдайте 'Final Answer:'.")
-                history.append({"role": "user", "content": warning_msg})
+                history.append({"role": "user", "content": (
+                    "ОШИБКА: вы написали 'Observation:' без 'Action:'. Это нарушение "
+                    "формата ReAct. Observation предоставляет ТОЛЬКО система. "
+                    "Начните с 'Thought:' и вызовите инструмент, либо выдайте "
+                    "'Final Answer:'.")})
                 continue
-            # ОБРАБОТКА ЧИСТОГО THOUGHT (без Action и Final Answer)
-            # LLM выдала только Thought, не решила что делать дальше.
-            # Вставляем user-сообщение, чтобы подтолкнуть к Action/Final Answer
-            # и избежать 2 assistant-сообщений подряд.
+
             if parsed["type"] == "thought":
-                print("[PARSER] LLM выдала только Thought без Action/Final Answer. "
-                      "Вставляю user-сообщение-подсказку.")
-                nudge_msg = (
+                history.append({"role": "user", "content": (
                     "Продолжайте. Вы написали Thought, но не сделали выбор:\n"
-                    "- если данных НЕДОСТАТОЧНО — вызовите инструмент: "
-                    "'Action: <tool_name>' + 'Action Input: {...}'\n"
-                    "- если данных ДОСТАТОЧНО — выдайте 'Final Answer: ...'\n"
-                    "НЕ пишите 'Observation:' сами — его предоставляет система.")
-                history.append({"role": "user", "content": nudge_msg})
+                    "- если данных НЕДОСТАТОЧНО — вызовите инструмент;\n"
+                    "- если данных ДОСТАТОЧНО — выдайте 'Final Answer:'.")})
                 continue
+
             if parsed["type"] == "final_answer":
-                # ДЕТЕКЦИЯ "PLAN-AS-DONE" ГАЛЛЮЦИНАЦИИ:
-                # LLM выдала Final Answer с <!-- SYSTEM_WIDGET --> плейсхолдерами,
-                # но ни один инструмент не был вызван (кэш пуст).
-                # Это значит, что LLM приняла план за отчёт о сделанном
                 answer_text = parsed["answer"]
                 has_system_widgets = "<!-- SYSTEM_WIDGET" in answer_text
                 has_observations = any(
                     msg["role"] == "user" and msg["content"].startswith("Observation:")
                     for msg in history)
                 if has_system_widgets and not has_observations:
-                    print("[PARSER] Final Answer с виджетами, но ни один инструмент не вызван. "
-                          "Отклоняю — требую вызвать инструмент.")
-                    reject_msg = (
-                        "ОТКЛОНЕНО. Ваш Final Answer содержит плейсхолдеры виджетов "
-                        "<!-- SYSTEM_WIDGET -->, но вы НЕ ВЫЗВАЛИ ни одного инструмента. "
-                        "Данные для виджетов берутся из Observation, а Observation "
-                        "появляется только после вызова инструмента через Action.\n\n"
-                        "Вы перепутали ПЛАН (инструкцию) с ОТЧЁТОМ о сделанном. "
-                        "План — это то, что ВАМ нужно сделать. Вы ещё ничего не сделали.\n\n"
-                        "Пожалуйста, начните заново:\n"
-                        "1. Вызовите первый инструмент из плана через Action.\n"
-                        "2. Дождитесь Observation от системы.\n"
-                        "3. Только после получения данных выдавайте Final Answer с виджетами.")
-                    history.append({"role": "user", "content": reject_msg})
+                    history.append({"role": "user", "content": (
+                        "ОТКЛОНЕНО. Ваш Final Answer содержит плейсхолдеры виджетов, "
+                        "но вы НЕ ВЫЗВАЛИ ни одного инструмента. Данные для виджетов "
+                        "берутся из Observation. Вы перепутали ПЛАН с ОТЧЁТОМ. "
+                        "Начните заново: вызовите первый инструмент из плана.")})
                     continue
                 observations = [
                     msg["content"] for msg in history
                     if msg["role"] == "user" and msg["content"].startswith("Observation:")]
-                hallucinated = self._detect_hallucinations(parsed["answer"], observations)
+                hallucinated = detect_hallucinations(parsed["answer"], observations)
                 if hallucinated:
-                    print(f"\n{'-'*60}")
-                    print(f"ВНИМАНИЕ: Потенциальные галлюцинации ({len(hallucinated)}):")
-                    for item in hallucinated:
-                        print(f"  - {item}")
-                    print(f"{'-'*60}")
-                final_text = parsed["answer"]
-                final_text = self._render_system_widgets(final_text)
-                final_text = self._expand_widget_descriptors(final_text)
+                    print(f"ВНИМАНИЕ: Потенциальные галлюцинации: {hallucinated}")
+                final_text = self._postprocess_final_answer(parsed["answer"])
                 print(f"Финальный ответ:\n{final_text}\n")
                 return final_text
-            elif parsed["type"] == "action":
-                tool = next((t for t in active_tools if t["name"] == parsed["action"]), None)
+
+            # parsed["type"] == "action"
+            action = parsed["action"]
+            action_input_str = parsed["action_input"]
+            # Маппинги skill→tool, plugin→tool
+            tool = next((t for t in active_tools if t["name"] == action), None)
+            if not tool:
+                if action in skill_to_tool_map:
+                    action = skill_to_tool_map[action]
+                    print(f"[CORRECTION] skill '{parsed['action']}' -> tool '{action}'")
+                    tool = next((t for t in active_tools if t["name"] == action), None)
+                elif action in plugin_to_tool_map:
+                    action = plugin_to_tool_map[action]
+                    print(f"[CORRECTION] plugin '{parsed['action']}' -> tool '{action}'")
+                    tool = next((t for t in active_tools if t["name"] == action), None)
+            if not tool:
+                from difflib import get_close_matches
+                matches = get_close_matches(
+                    action, [t["name"] for t in active_tools], n=1, cutoff=0.7)
+                if matches:
+                    action = matches[0]
+                    tool = next(t for t in active_tools if t["name"] == action)
+                    print(f"Автоисправление (fuzzy): -> '{action}'")
+
+            if not tool:
+                observation = (
+                    f"Error: Tool '{parsed['action']}' not found in active tools. "
+                    f"Available: {', '.join(t['name'] for t in active_tools)}")
+            else:
+                try:
+                    action_input = json.loads(action_input_str) if action_input_str else {}
+                    call_sig = (action, json.dumps(action_input, sort_keys=True))
+                    call_count = self._tool_call_counts.get(call_sig, 0)
+                    if call_count >= 1:
+                        self._tool_call_counts[call_sig] = call_count + 1
+                        print(f"[DEDUP] Повторный вызов {action} (попытка #{call_count + 1})")
+                        if call_count >= 2:
+                            forced = (
+                                "На основе полученных данных формирую ответ.\n\n"
+                                f"ВНИМАНИЕ: вы попытались вызвать '{action}' уже "
+                                f"{call_count + 1} раз с одинаковыми аргументами. "
+                                "Это зацикливание. Используйте ТОЛЬКО данные из "
+                                "предыдущих Observation. Проанализируйте их сами "
+                                "и выдайте Final Answer с виджетами согласно плану.")
+                            history.append({"role": "user",
+                                            "content": f"Observation: {forced}"})
+                            continue
+                        cached_obs = self._tool_call_history[call_sig]
+                        warning = (
+                            "\n\n[СИСТЕМНОЕ ПРЕДУПРЕЖДЕНИЕ] Вы уже вызывали "
+                            f"'{action}' с аргументами {action_input}. НЕ ВЫЗЫВАЙТЕ "
+                            "его снова. Переходите к следующему шагу или Final Answer.")
+                        observation = cached_obs + warning
+                    else:
+                        self._tool_call_counts[call_sig] = 1
+                        observation, raw_data = await self._execute_tool_call(action, action_input)
+                        self._tool_call_history[call_sig] = observation
+                        self._cache_tool_data(action, raw_data)
+                except json.JSONDecodeError:
+                    observation = "Error: Invalid JSON in Action Input."
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                    observation = f"Error executing tool: {e}"
+
+            print(f"Observation (для консоли):\n{observation[:600]}")
+            history.append({"role": "user",
+                            "content": f"Observation: {observation}"})
+        return "Превышено количество итераций."
+
+    def _build_stateless_react_prompt(
+        self,
+        query: str,
+        selected_plugins: List[str],
+        active_tools: List[Dict[str, Any]],
+        accumulated_data: str,
+        recent_calls_warning: str = "") -> str:
+        """ReAct-промпт для stateless-режима.
+        Ключевые отличия от history-режима:
+        - В промпт подаются полные методологии отобранных плагинов (без сжатия).
+        - В промпт подаётся накопленный блок фактических данных (а не история).
+        - Даётся указание составить план и выполнить первый шаг.
+        - Все правила в отношении виджетов обоих типов - как в режиме history.
+        - Указание, что структуру виджетов формировать можно только если план
+          состоит из одного шага (финального ответа) """
+        plugins_str = ", ".join(selected_plugins)
+
+        # Полные методологии отобранных плагинов
+        methodologies_parts: List[str] = []
+        widgets_catalog_parts: List[str] = []
+        for plugin in self.structure.plugins:
+            if plugin["name"] not in selected_plugins:
+                continue
+            for skill in plugin["skills"]:
+                methodologies_parts.append(
+                    f"=== Скилл: {skill['name']} (плагин: {plugin['name']}) ===\n"
+                    f"{skill['instructions']}")
+                # Отдельно — каталог виджетов с дословным config
+                for widget_def in skill.get("available_widgets", []):
+                    w_type = widget_def.get("type", "")
+                    for intent in widget_def.get("intents", []):
+                        intent_name = intent.get("name")
+                        if intent_name:
+                            widgets_catalog_parts.append(
+                                f"##### Intent: {intent_name} (тип: {w_type})\n"
+                                f"- Описание: {intent.get('description', '')}\n"
+                                f"- Config (ДОСЛОВНО):\n"
+                                f"{json.dumps(intent.get('config', {}), ensure_ascii=False, indent=2)}")
+        methodologies = "\n\n".join(methodologies_parts)
+        widgets_catalog = "\n\n".join(widgets_catalog_parts) if widgets_catalog_parts else "(Виджетов нет)"
+
+        # Список доступных инструментов
+        tools_list = "\n".join(
+            f"- {t['name']} (из плагина: {t['plugin']})" for t in active_tools)
+
+        # Блок фактических данных
+        if accumulated_data:
+            data_block = (
+                "## ФАКТИЧЕСКИЕ ДАННЫЕ КОМПАНИИ\n"
+                "По данным компании известно, что:\n\n"
+                f"{accumulated_data}\n\n"
+                "ВАЖНО: каждый блок данных выше помечен инструментом и аргументами, "
+                "которыми он был получен. Это означает, что данный вызов УЖЕ ВЫПОЛНЕН. "
+                "НЕ ПОВТОРЯЙТЕ вызовы инструментов с теми же аргументами, что уже "
+                "выполнены (см. строки вида «получены вызовом `<tool>` с аргументами "
+                "`<args>`»). Если вам нужны дополнительные данные — вызовите ДРУГОЙ "
+                "инструмент, либо ТОТ ЖЕ инструмент с ДРУГИМИ аргументами.\n")
+        else:
+            data_block = (
+                "## ФАКТИЧЕСКИЕ ДАННЫЕ КОМПАНИИ\n"
+                "(Пока данных нет — это первая итерация. Вызовите инструмент, "
+                "чтобы их получить.)\n")
+
+        # Предупреждение о недавних вызовах (анти-луп)
+        warning_block = recent_calls_warning or ""
+
+        return f"""**КРИТИЧЕСКОЕ ПРЕДУПРЕЖДЕНИЕ: Вы работаете с РЕАЛЬНЫМИ данными из корпоративных систем (Jira, SAP, Workday и т.п.).**
+**НИКОГДА не выдумывайте, не изменяйте данные. Используйте ТОЛЬКО данные из блока ФАКТИЧЕСКИЕ ДАННЫЕ и из Observation.**
+**Если вы не уверены, попросите уточнения вместо того, чтобы гадать.**
+
+Вы — экспертный Помощник по Управлению Проектами, придерживающийся принципов PMBOK 8.
+В данный момент вы работаете в доменах: {plugins_str}
+
+## МЕТОДОЛОГИИ (полные, изучите ВНИМАТЕЛЬНО, включая правила виджетов)
+{methodologies}
+
+## КАТАЛОГ ВИДЖЕТОВ (config — ДОСЛОВНО из методологий)
+{widgets_catalog}
+
+## ДОСТУПНЫЕ ИНСТРУМЕНТЫ
+{tools_list}
+
+{data_block}
+
+{warning_block}
+
+## ВОПРОС ПОЛЬЗОВАТЕЛЯ
+{query}
+
+## ИНСТРУКЦИЯ
+
+1. Изучите методологии выше (включая сведения о виджетах: их типы, config,
+   правила фильтрации данных, описания intents).
+
+2. **ОПРЕДЕЛИТЕ ВИДЖЕТЫ ФИНАЛЬНОГО ОТВЕТА.** Какой бы вопрос ни был задан,
+   ответ почти всегда требует одного или нескольких виджетов из каталога
+   выше. Прямо сейчас, в Thought, решите:
+   - Какие виджеты вы ХОТИТЕ вставить в Final Answer (укажите их intent-ы)?
+   - Какие ДАННЫЕ нужны каждому из этих виджетов (какие поля из каких таблиц)?
+   - Какой ИНСТРУМЕНТ предоставляет эти данные?
+
+3. **ОЦЕНИТЕ, ХВАТАЕТ ЛИ ДАННЫХ — С УЧЁТОМ ВИДЖЕТОВ.** Данных достаточно
+   только тогда, когда для КАЖДОГО виджета из шага 2 в блоке ФАКТИЧЕСКИЕ
+   ДАННЫЕ есть соответствующая таблица. Если вы хотите вставить виджет X,
+   а данных для него ещё нет — это НЕ финальный шаг, нужно вызвать
+   недостающий инструмент.
+
+   ПРИМЕР ОШИБКИ, которую нужно избегать:
+   - Хочу виджет `evm_curves` (нужны данные `calculate_evm`) и
+     виджет `eac_forecast_scenarios` (тоже нужны `calculate_evm`).
+   - В ФАКТИЧЕСКИХ ДАННЫХ есть только `get_budget_vs_actual`.
+   - НЕВЕРНО: «данных достаточно, делаю Final Answer с виджетами» —
+     рендер виджетов упадёт с «No cached data for tool 'calculate_evm'».
+   - ВЕРНО: «нужно ещё вызвать `calculate_evm`, план состоит из 2 шагов».
+
+4. Составьте план действий ReAct — пронумерованный список шагов:
+   - Каждый шаг — EITHER вызов инструмента (с указанием имени и args),
+     EITHER подготовка финального ответа.
+   - Если данных НЕ достаточно (хоть для текста, хоть для виджетов):
+     план состоит из нескольких шагов (вызовы инструментов), последний
+     шаг — подготовка финального ответа.
+   - Если данных ДОСТАТОЧНО для текста И для всех запланированных
+     виджетов: план состоит из ОДНОГО шага — подготовка финального ответа.
+
+5. **Правило формирования виджетов (КРИТИЧНО):**
+   - НА ЛЮБОМ ШАГЕ плана, КРОМЕ последнего, вы можете ТОЛЬКО вызывать
+     инструменты для сбора данных. ВАМ ЗАПРЕЩЕНО формировать структуру
+     для отрисовки виджетов на промежуточных шагах.
+   - Виджеты (плейсхолдеры `<!-- SYSTEM_WIDGET -->` и JSON-блоки
+     `action_card`) появляются **ТОЛЬКО В ФИНАЛЬНОМ ОТВЕТЕ** — то есть
+     на последнем шаге плана.
+   - Каталог виджетов и их config приведены выше **ДЛЯ СВЕДЕНИЯ**: вы
+     видите их на каждом шаге, чтобы понимать, какие данные нужно
+     собрать. Но формировать виджеты вы будете позже, на последнем шаге,
+     из того набора данных, который у вас накопится к этому моменту.
+
+6. **Результатом вашего ответа должно быть**:
+   а) блок `Plan:` с пронумерованными шагами в формате:
+      `Step N: Call <tool_name> with args <json> — <причина>`
+      или `Step N: Final Answer — <причина>`.
+   б) `Thought:` — ваше рассуждение (включая выбор виджетов и проверку
+      наличия данных для них — см. шаги 2 и 3).
+   в) Если в плане больше одного шага: выполните первый шаг —
+      `Action: <tool_name>` и `Action Input: <json>`.
+   г) Если в плане ровно один шаг и это финальный ответ —
+      `Final Answer: <текст ответа на языке вопроса пользователя>` + виджеты.
+
+## ПРАВИЛА ВИДЖЕТОВ (из методологий, без изменений)
+
+**ВИДЖЕТЫ — ЭТО НЕ ИНСТРУМЕНТЫ. Их нельзя вызывать через `Action:`.**
+
+**ВИДЖЕТ ТИП А: СИСТЕМНЫЕ ВИДЖЕТЫ (LineChart, BarChart, ScatterChart и т.д.)**
+Эти виджеты рендерятся ИЗ данных инструментов, которые вы вызывали.
+В Final Answer вставьте плейсхолдер (один на виджет):
+<!-- SYSTEM_WIDGET: имя_intent | FILTER: {{"key": "value"}} | TITLE: Заголовок -->
+Где `имя_intent` — это ИМЯ INTENT-а из КАТАЛОГА ВИДЖЕТОВ выше (например
+`risk_matrix_priority`, `evm_curves`, `cpi_spi_trend`).
+**ИМЯ INTENT-А — НЕ ИМЯ ИНСТРУМЕНТА!** Не подставляйте в плейсхолдер имена
+инструментов вроде `get_risk_register`, `calculate_evm`, `get_ncr_status` —
+это имена вызовов, а не виджетов. Если сомневаетесь — НЕ вставляйте
+плейсхолдер, дайте только текстовый ответ.
+НЕ генерируйте для них JSON с data_rows!
+В FILTER передавайте ТОЛЬКО простые значения или массивы строк.
+ЗАПРЕЩЕНО `{{"$regex": "..."}}` или `{{"$gt": 10}}`.
+
+**ВИДЖЕТ ТИП Б: МОДЕЛЬНЫЕ ВИДЖЕТЫ (action_card и др.)**
+ИХ НЕЛЬЗЯ рендерить через <!-- SYSTEM_WIDGET --> placeholder!
+В Final Answer сгенерируйте полный JSON-блок, ОБЯЗАТЕЛЬНО обёрнутый в ```json ... ```:
+```json
+{{
+  "widget_type": "action_card",
+  "intent": "<имя_intent>",
+  "title": "<заголовок на языке вопроса пользователя>",
+  "message": "<текст на основе данных из ФАКТИЧЕСКИХ ДАННЫХ>",
+  "button": {{"text": "<текст кнопки>", "action": "<действие>", "payload": {{...}}}}
+}}
+```
+ПОЛЕ message ДОЛЖНО БЫТЬ УНИКАЛЬНЫМ для каждого виджета.
+
+**ОБЩИЕ ПРАВИЛА:**
+- ЗАПРЕЩЕНО генерировать виджеты "по памяти" — берите intents ТОЛЬКО из каталога выше.
+- ЗАПРЕЩЕНО выдумывать имена инструментов — берите ТОЛЬКО из списка ДОСТУПНЫЕ ИНСТРУМЕНТЫ.
+- В Final Answer сначала дайте текстовый ответ пользователю (анализ, конкретные
+  выводы с именами/числами из ФАКТИЧЕСКИХ ДАННЫХ), затем — плейсхолдеры/JSON виджетов.
+- Если запрос затрагивает несколько аспектов, включайте ВСЕ релевантные виджеты.
+
+## СИНТАКСИС ОТВЕТА (СТРОГО)
+
+```
+Plan:
+Step 1: Call <tool_name> with args {{"k": "v"}} — причина
+Step 2: Call <tool_name> with args {{}} — причина
+Step 3: Final Answer — причина
+
+Thought: <ваше рассуждение, почему план именно такой>
+Action: <tool_name>
+Action Input: {{"k": "v"}}
+```
+
+ИЛИ (одношаговый план = финальный ответ):
+
+```
+Plan:
+Step 1: Final Answer — причина
+
+Thought: <ваше рассуждение>
+Final Answer: <текст ответа>
+<!-- SYSTEM_WIDGET: ... | FILTER: {{}} | TITLE: ... -->
+```json
+{{ ... action_card ... }}
+```
+```
+
+## КРИТИЧЕСКИЕ ПРАВИЛА
+- **НЕ ПОВТОРЯЙТЕ ВЫЗОВЫ ИНСТРУМЕНТОВ** с теми же аргументами, что уже
+  выполнены. Каждый блок фактических данных выше помечен инструментом и
+  аргументами вызова — это ваша история вызовов. Перед составлением плана
+  ПРОСМОТРИТЕ эти метки и НЕ включайте в план уже выполненные вызовы.
+  Подряд-повтор будет принудительно пропущен системой; непоследовательный
+  повтор (через несколько итераций) — не будет принудительно заблокирован,
+  но БЕССМЫСЛЕН, так как данные не изменятся.
+- Если данных достаточно — НЕ вызывайте инструменты, сразу давайте Final Answer.
+- Если данных не достаточно — НЕ пытайтесь угадать ответ, вызовите инструмент
+  (но НЕ из уже выполненных — см. выше).
+- Имена сущностей в ответе — ТОЛЬКО из фактических данных.
+
+**СТРОГОЕ ПРАВИЛО ЯЗЫКА:** Final Answer на ТОМ ЖЕ языке, на котором задан вопрос.
+
+Начните!
+"""
+
+    def _format_accumulated_data(self, accumulated: List[Tuple[str, Dict[str, Any], str]]) -> str:
+        """ Форматирует список прошлых вызовов (tool, args, observation)
+        в единый блок фактических данных.
+        Перед каждым блоком данных приписывается, каким инструментом и с какими
+        аргументами он был получен - это даёт модели явный сигнал, что вызов
+        уже выполнялся, и помогает избежать повторов (в т.ч. не подряд).
+        Системные уведомления (`_system_notice`) выделяются в отдельную секцию """
+        if not accumulated:
+            return ""
+        data_parts: List[str] = []
+        notice_parts: List[str] = []
+        data_index = 0
+        for entry in accumulated:
+            tool, args, obs = entry
+            if tool == "_system_notice":
+                notice_parts.append(obs)
+                continue
+            data_index += 1
+            args_str = json.dumps(args, ensure_ascii=False)
+            header = (
+                f"--- Данные {data_index}: получены вызовом "
+                f"`{tool}` с аргументами `{args_str}` ---"
+            )
+            # Извлекаем Markdown-таблицу из observation, если возможно
+            body = obs
+            try:
+                obs_json = json.loads(obs)
+                if isinstance(obs_json, dict):
+                    data_md = obs_json.get("data")
+                    if data_md:
+                        body = data_md
+            except json.JSONDecodeError:
+                pass
+            data_parts.append(f"{header}\n{body}")
+        sections: List[str] = []
+        if data_parts:
+            sections.append("\n\n".join(data_parts))
+        if notice_parts:
+            sections.append("--- СИСТЕМНЫЕ УВЕДОМЛЕНИЯ ---\n" + "\n\n".join(notice_parts))
+        return "\n\n".join(sections)
+
+    def _push_recent_call(self, tool: str, args: Dict[str, Any]):
+        """ Добавляет вызов в стек последних вызовов (вершина - индекс 0) """
+        self._recent_calls_stack.insert(0, (tool, args))
+        if len(self._recent_calls_stack) > _STATELESS_RECENT_STACK_SIZE:
+            self._recent_calls_stack = self._recent_calls_stack[:_STATELESS_RECENT_STACK_SIZE]
+
+    def _format_recent_calls_warning(self) -> str:
+        """ Если стек не пуст - формирует явное предупреждение о подряд-повторе.
+        Даже если модель видит все прошлые вызовы в блоке данных, это
+        предупреждение дополнительно акцентирует внимание на самом свежем
+        вызове (стек последних 2), потому что подряд-повтор будет
+        принудительно пропущен системой """
+        if not self._recent_calls_stack:
+            return ""
+        top_tool, top_args = self._recent_calls_stack[0]
+        return (
+            "## ПРЕДУПРЕЖДЕНИЕ О ПОДРЯД-ПОВТОРЕ\n"
+            f"Самый свежий выполненный вызов (см. последний блок данных выше): "
+            f"`{top_tool}` с аргументами "
+            f"`{json.dumps(top_args, ensure_ascii=False)}`. "
+            "Если ваш план начинается с ЭТОГО ЖЕ вызова (тот же инструмент + те "
+            "же аргументы) — система ПРИНУДИТЕЛЬНО пропустит его и выполнит "
+            "следующий шаг плана. Чтобы не тратить итерацию, СРАЗУ выберите "
+            "другой первый шаг.\n")
+
+    def _pick_first_non_duplicate_step(
+            self, plan_steps: List[Dict[str, Any]],
+            fallback_action: Optional[Tuple[str, Dict[str, Any]]]
+            ) -> Optional[Tuple[str, Dict[str, Any]]]:
+        """ Из списка шагов плана выбирает первый шаг, который не является
+        подряд-дубликатом верхнего вызова из стека.
+        Если план пустой - возвращает fallback_action (если он сам не дубликат) """
+        for step in plan_steps:
+            if step.get("kind") != "tool_call":
+                continue
+            tool = step["tool"]
+            args = step.get("args", {}) or {}
+            if not is_consecutive_duplicate(tool, args, self._recent_calls_stack):
+                return (tool, args)
+        # Все шаги - дубликаты (или не tool_call). Используем fallback
+        if fallback_action and not is_consecutive_duplicate(
+                fallback_action[0], fallback_action[1], self._recent_calls_stack):
+            return fallback_action
+        return None
+
+    async def run_stateless_loop(self, query: str) -> str:
+        """ Каждая итерация начинается с чистого листа,
+        к запросу прирастает блок фактических данных. История диалога для LLM
+        не накапливается. Анти-loop через стек последних 2 вызовов """
+        accumulated: List[Tuple[str, Dict[str, Any], str]] = []
+        self._recent_calls_stack.clear()
+
+        for iteration in range(_MAX_ITERATIONS_STATELESS):
+            print(f"\n{'=' * 80}\n[STATELESS Итерация {iteration + 1}]\n{'=' * 80}")
+
+            accumulated_data = self._format_accumulated_data(accumulated)
+            recent_warning = self._format_recent_calls_warning()
+
+            # Роутинг (каждую итерацию заново, со всеми методологиями)
+            try:
+                selected_plugins = await self.route_query(query, accumulated_data)
+            except Exception as e:
+                print(f"Ошибка маршрутизации: {e}")
+                return "Не удалось определить контекст запроса."
+
+            active_tools = [t for t in self.all_tools if t["plugin"] in selected_plugins]
+            if not active_tools:
+                return "Не удалось найти подходящие инструменты."
+
+            # Построение промпта (полные методологии + накопленные данные)
+            prompt = self._build_stateless_react_prompt(
+                query=query,
+                selected_plugins=selected_plugins,
+                active_tools=active_tools,
+                accumulated_data=accumulated_data,
+                recent_calls_warning=recent_warning)
+            print(f"[DEBUG] Stateless prompt: {len(prompt)} символов")
+
+            # Вызов LLM - модель строит план и выполняет первый шаг
+            try:
+                llm_text = await self._call_llm(
+                    [{"role": "user", "content": prompt}])
+            except Exception as e:
+                print(f"Ошибка обращения к LLM: {e}")
+                return "Ошибка подключения к LLM."
+            print(f"LLM (полный ответ):\n{llm_text}\n" + "-" * 30)
+
+            # Парсим ответ: извлекаем блок Plan и блок Thought/Action/Final Answer
+            plan_text, rest_text = extract_plan_block(llm_text)
+            plan_steps = parse_plan_steps(plan_text) if plan_text else []
+            print(f"[PLAN] Шагов в плане: {len(plan_steps)}")
+            for s in plan_steps:
+                if s["kind"] == "tool_call":
+                    print(f"  Step {s['step']}: Call {s['tool']} args={s.get('args')}")
+                else:
+                    print(f"  Step {s['step']}: {s['kind']}")
+
+            parsed = parse_llm_response(rest_text)
+
+            # Случай 1: модель решила, что данных достаточно - финальный ответ
+            # (одношаговый план = Final Answer)
+            is_single_final_step = (
+                len(plan_steps) == 1 and plan_steps[0]["kind"] == "final_answer")
+            if parsed["type"] == "final_answer" or is_single_final_step:
+                if parsed["type"] != "final_answer":
+                    # План одношаговый = Final Answer, но LLM не выдала Final Answer.
+                    # Просим её сгенерировать финальный ответ отдельным вызовом
+                    print("[STATELESS] Одношаговый план Final Answer, но LLM не выдала ответ. "
+                          "Делаем дополнительный вызов для генерации ответа с виджетами.")
+                    final_text = await self._generate_final_answer_stateless(
+                        query=query,
+                        selected_plugins=selected_plugins,
+                        active_tools=active_tools,
+                        accumulated_data=accumulated_data)
+                    if final_text:
+                        return final_text
+                    # Если не вышло - продолжаем цикл
+                    continue
+                # Проверка: модель не вызывала ни одного инструмента, но в ответе
+                # есть плейсхолдеры системных виджетов. Если данных в accumulated
+                # нет, то это галлюцинация план-as-done
+                answer_text = parsed["answer"]
+                has_system_widgets = "<!-- SYSTEM_WIDGET" in answer_text
+                if has_system_widgets and not accumulated:
+                    print("[STATELESS] Final Answer с виджетами, но данных ещё нет. "
+                          "Отклоняю — требую вызвать инструмент.")
+                    # Добавляем в accumulated_data предупреждающий блок, чтобы
+                    # следующая итерация знала, что нужна выборка данных
+                    accumulated.append(("_system_notice", {},
+                        "СИСТЕМНОЕ УВЕДОМЛЕНИЕ: в прошлой итерации модель попыталась "
+                        "выдать Final Answer с виджетами, не вызвав ни одного "
+                        "инструмента. Это запрещено. Нужно сначала вызвать инструмент."))
+                    continue
+
+                # Для каждого плейсхолдера SYSTEM_WIDGET
+                # в Final Answer должен быть вызван питающий инструмент
+                # (его данные лежат в data_cache). Если хотя бы одного нет -
+                # отклоняем Final Answer и просим модель вызвать недостающий
+                # инструмент. Это принудительная защита от срезания углов
+                missing_widgets = self._check_widgets_data_presence(answer_text)
+                if missing_widgets:
+                    print(f"[STATELESS] Final Answer отклонён: для {len(missing_widgets)} "
+                          f"виджет(ов) нет данных в кэше:")
+                    needed_tools = set()
+                    for w in missing_widgets:
+                        print(f"  - intent='{w['intent']}' требует инструмент "
+                              f"'{w['tool_name']}' (не вызывался)")
+                        if w["tool_name"] and w["tool_name"] != "(не определён)":
+                            needed_tools.add(w["tool_name"])
+                    # Формируем понятное уведомление для модели
+                    if needed_tools:
+                        tools_list_str = ", ".join(f"`{t}`" for t in sorted(needed_tools))
+                        notice = (
+                            f"СИСТЕМНОЕ УВЕДОМЛЕНИЕ: ваш прошлый Final Answer отклонён. "
+                            f"В нём были виджеты, для которых нет данных, потому что "
+                            f"питающие их инструменты не были вызваны. "
+                            f"НЕОБХОДИМО ВЫЗВАТЬ: {tools_list_str}. "
+                            f"Составьте план, где первый шаг — вызов недостающего "
+                            f"инструмента, и выполните его. После получения данных "
+                            f"сформируйте Final Answer заново.")
+                    else:
+                        notice = (
+                            "СИСТЕМНОЕ УВЕДОМЛЕНИЕ: ваш прошлый Final Answer отклонён. "
+                            "В нём были виджеты с неизвестными источниками данных. "
+                            "Уберите эти виджеты или вызовите корректные инструменты.")
+                    accumulated.append(("_system_notice", {}, notice))
+                    continue
+
+                # Если модель решила, что план одношаговый
+                # (Final Answer), крайне желательно сгенерировать виджеты.
+                # Если виджетов нет, а в каталоге есть релевантные, то просим
+                # модель добавить их в отдельном вызове
+                if not ("<-- SYSTEM_WIDGET" in answer_text
+                        or "```json" in answer_text
+                        or "<!-- SYSTEM_WIDGET" in answer_text):
+                    # Проверим, есть ли в выбранных плагинах хотя бы один виджет
+                    has_any_widget = any(
+                        skill.get("available_widgets")
+                        for plugin in self.structure.plugins
+                        if plugin["name"] in selected_plugins
+                        for skill in plugin.get("skills", []))
+                    if has_any_widget and not accumulated:
+                        # Нет данных, нет виджетов, пусть попробует ещё раз
+                        pass
+                    # Если данные есть, но виджетов нет, добавим мягкое требование
+                    # через дополнительный вызов (не блокируем)
+                final_text = self._postprocess_final_answer(answer_text)
+                print(f"Финальный ответ:\n{final_text}\n")
+                return final_text
+
+            # Модель хочет вызвать инструмент (первый шаг плана)
+            if parsed["type"] == "action":
+                proposed_tool = parsed["action"]
+                try:
+                    proposed_args = json.loads(parsed["action_input"]) if parsed["action_input"] else {}
+                except json.JSONDecodeError:
+                    proposed_args = {}
+
+                # Анти-loop: если первый шаг - подряд-дубликат, - берём следующий
+                # не-дубликат шаг из плана
+                if is_consecutive_duplicate(proposed_tool, proposed_args, self._recent_calls_stack):
+                    print(f"[ANTI-LOOP] Первый шаг плана '{proposed_tool}' — подряд-дубликат. "
+                          "Ищу следующий не-дубликат шаг в плане.")
+                    next_step = self._pick_first_non_duplicate_step(
+                        plan_steps, fallback_action=(proposed_tool, proposed_args))
+                    if next_step is None:
+                        # Все шаги - дубликаты. Принудительно требуем финальный ответ
+                        print("[ANTI-LOOP] Все шаги плана — подряд-дубликаты. "
+                              "Принудительно требуем Final Answer.")
+                        accumulated.append(("_system_notice", {},
+                            "СИСТЕМНОЕ УВЕДОМЛЕНИЕ: модель пытается повторять "
+                            "одни и те же вызовы. Все доступные данные уже собраны. "
+                            "Сформируйте финальный ответ с виджетами на основе "
+                            "имеющихся фактических данных."))
+                        continue
+                    proposed_tool, proposed_args = next_step
+                    print(f"[ANTI-LOOP] Выполняю вместо первого шага: "
+                          f"{proposed_tool} args={proposed_args}")
+
+                # Маппинги skill→tool, plugin→tool
+                tool = next((t for t in active_tools if t["name"] == proposed_tool), None)
                 if not tool:
-                    original_action = parsed["action"]
-                    if original_action in skill_to_tool_map:
-                        parsed["action"] = skill_to_tool_map[original_action]
-                        tool = next((t for t in active_tools if t["name"] == parsed["action"]), None)
-                        print(f"[CORRECTION] LLM вызвала skill '{original_action}', исправлено на tool '{parsed['action']}'")
-                    elif original_action in plugin_to_tool_map:
-                        parsed["action"] = plugin_to_tool_map[original_action]
-                        tool = next((t for t in active_tools if t["name"] == parsed["action"]), None)
-                        print(f"[CORRECTION] LLM вызвала plugin '{original_action}', исправлено на tool '{parsed['action']}'")
+                    skill_to_tool = {}
+                    plugin_to_tool = {}
+                    for t in active_tools:
+                        if t["plugin"] not in plugin_to_tool:
+                            plugin_to_tool[t["plugin"]] = t["name"]
+                    for plugin in self.structure.plugins:
+                        if plugin["name"] in selected_plugins:
+                            for skill in plugin.get("skills", []):
+                                sn = skill.get("name")
+                                if sn:
+                                    fb = next((t["name"] for t in active_tools
+                                               if t["plugin"] == plugin["name"]), None)
+                                    if fb:
+                                        skill_to_tool[sn] = fb
+                    if proposed_tool in skill_to_tool:
+                        proposed_tool = skill_to_tool[proposed_tool]
+                        print(f"[CORRECTION] skill -> tool '{proposed_tool}'")
+                    elif proposed_tool in plugin_to_tool:
+                        proposed_tool = plugin_to_tool[proposed_tool]
+                        print(f"[CORRECTION] plugin -> tool '{proposed_tool}'")
+                    tool = next((t for t in active_tools if t["name"] == proposed_tool), None)
                 if not tool:
                     from difflib import get_close_matches
-                    tool_names = [t["name"] for t in active_tools]
-                    matches = get_close_matches(parsed["action"], tool_names, n=1, cutoff=0.7)
+                    matches = get_close_matches(
+                        proposed_tool, [t["name"] for t in active_tools],
+                        n=1, cutoff=0.7)
                     if matches:
-                        tool = next(t for t in active_tools if t["name"] == matches[0])
-                        print(f"Автоисправление (fuzzy): '{parsed['action']}' -> '{matches[0]}'")
-                        parsed["action"] = matches[0]
+                        proposed_tool = matches[0]
+                        tool = next(t for t in active_tools if t["name"] == proposed_tool)
+                        print(f"Автоисправление (fuzzy): -> '{proposed_tool}'")
+
                 if not tool:
-                    observation = (
-                        f"Error: Tool '{parsed['action']}' not found in active tools. "
-                        f"Available tools: {', '.join([t['name'] for t in active_tools])}")
+                    # Инструмент не найден - добавим уведомление в accumulated
+                    available = ", ".join(t["name"] for t in active_tools)
+                    accumulated.append(("_system_notice", {},
+                        f"СИСТЕМНОЕ УВЕДОМЛЕНИЕ: инструмент '{proposed_tool}' не найден. "
+                        f"Доступные: {available}."))
+                    continue
+
+                observation, raw_data = await self._execute_tool_call(proposed_tool, proposed_args)
+                self._cache_tool_data(proposed_tool, raw_data)
+                # Наращиваем accumulated (модель не видит имени инструмента,
+                # только данные)
+                accumulated.append((proposed_tool, proposed_args, observation))
+                # Обновляем стек последних вызовов
+                self._push_recent_call(proposed_tool, proposed_args)
+                print(f"[STATELESS] Накоплено блоков данных: {len(accumulated)}")
+                continue
+
+            # LLM выдала Thought без Action/Final Answer, или
+            # галлюцинировала Observation. Добавим уведомление в accumulated
+            if parsed["type"] == "hallucinated_observation":
+                accumulated.append(("_system_notice", {},
+                    "СИСТЕМНОЕ УВЕДОМЛЕНИЕ: в прошлой итерации модель написала "
+                    "'Observation:' без 'Action:'. Это нарушение формата. "
+                    "Observation предоставляет ТОЛЬКО система. Начните с 'Thought:' "
+                    "и вызовите инструмент через 'Action:'."))
+                continue
+            if parsed["type"] == "thought":
+                accumulated.append(("_system_notice", {},
+                    "СИСТЕМНОЕ УВЕДОМЛЕНИЕ: в прошлой итерации модель выдала "
+                    "только Thought без Action или Final Answer. Сделайте выбор: "
+                    "вызовите инструмент или выдайте финальный ответ."))
+                continue
+
+        return "Превышено количество итераций в stateless-режиме."
+
+    async def _generate_final_answer_stateless(
+        self,
+        query: str,
+        selected_plugins: List[str],
+        active_tools: List[Dict[str, Any]],
+        accumulated_data: str) -> Optional[str]:
+        """ Дополнительный вызов LLM для генерации финального ответа с виджетами,
+        когда план одношаговый (Final Answer), но LLM не выдала сам ответ """
+        plugins_str = ", ".join(selected_plugins)
+        widgets_catalog_parts: List[str] = []
+        for plugin in self.structure.plugins:
+            if plugin["name"] not in selected_plugins:
+                continue
+            for skill in plugin["skills"]:
+                for widget_def in skill.get("available_widgets", []):
+                    w_type = widget_def.get("type", "")
+                    for intent in widget_def.get("intents", []):
+                        intent_name = intent.get("name")
+                        if intent_name:
+                            widgets_catalog_parts.append(
+                                f"##### Intent: {intent_name} (тип: {w_type})\n"
+                                f"- Описание: {intent.get('description', '')}\n"
+                                f"- Config (ДОСЛОВНО):\n"
+                                f"{json.dumps(intent.get('config', {}), ensure_ascii=False, indent=2)}")
+        widgets_catalog = "\n\n".join(widgets_catalog_parts) if widgets_catalog_parts else "(Виджетов нет)"
+
+        prompt = f"""Вы — экспертный Помощник по Управлению Проектами (PMBOK 8).
+Домены: {plugins_str}
+
+## ФАКТИЧЕСКИЕ ДАННЫЕ КОМПАНИИ
+По данным компании известно, что:
+
+{accumulated_data}
+
+## КАТАЛОГ ВИДЖЕТОВ (config — ДОСЛОВНО)
+{widgets_catalog}
+
+## ВОПРОС ПОЛЬЗОВАТЕЛЯ
+{query}
+
+## ИНСТРУКЦИЯ
+Данных достаточно для ответа. Сформируйте финальный ответ.
+
+ПРАВИЛО ФОРМИРОВАНИЯ ВИДЖЕТОВ (КРИТИЧНО):
+- Вы можете вставлять в Final Answer только те виджеты, для которых
+  в блоке ФАКТИЧЕСКИЕ ДАННЫЕ уже есть соответствующая таблица.
+- Прежде чем вставить плейсхолдер `<!-- SYSTEM_WIDGET: ... -->`,
+  проверьте: есть ли в ФАКТИЧЕСКИХ ДАННЫХ таблица с полями, которые
+  требует этот виджет? Если нет — НЕ вставляйте его, выпустите ответ
+  без этого виджета.
+- Аналогично для `action_card`: данные для `message` берутся из
+  ФАКТИЧЕСКИХ ДАННЫХ, никаких выдуманных чисел.
+
+КРИТИЧЕСКИЕ ПРАВИЛА ВИДЖЕТОВ (из исходного решения):
+
+**ВИДЖЕТ ТИП А: СИСТЕМНЫЕ ВИДЖЕТЫ** — вставляйте плейсхолдер:
+<!-- SYSTEM_WIDGET: имя_intent | FILTER: {{"key": "value"}} | TITLE: Заголовок -->
+
+**ВИДЖЕТ ТИП Б: МОДЕЛЬНЫЕ ВИДЖЕТЫ (action_card)** — генерируйте полный JSON,
+обёрнутый в ```json ... ```:
+```json
+{{
+  "widget_type": "action_card",
+  "intent": "<имя_intent>",
+  "title": "<заголовок>",
+  "message": "<текст>",
+  "button": {{"text": "...", "action": "...", "payload": {{...}}}}
+}}
+```
+
+ОБЩИЕ ПРАВИЛА:
+- Сначала текстовый ответ (анализ, конкретные выводы с именами/числами), затем виджеты.
+- Имена сущностей — ТОЛЬКО из фактических данных.
+- Не выдумывайте intents — берите из каталога выше.
+
+**ЕСЛИ В КАТАЛОГЕ ЕСТЬ ХОТЯ БЫ ОДИН ВИДЖЕТ, РЕЛЕВАНТНЫЙ ВОПРОСУ — КРАЙНЕ ЖЕЛАТЕЛЬНО ЕГО СГЕНЕРИРОВАТЬ.**
+
+Final Answer должен быть на ТОМ ЖЕ языке, что и вопрос пользователя.
+
+Выдайте только Final Answer (без Plan и Thought).
+"""
+        try:
+            llm_text = await self._call_llm([{"role": "user", "content": prompt}])
+        except Exception as e:
+            print(f"Ошибка LLM в _generate_final_answer_stateless: {e}")
+            return None
+        # Извлекаем Final Answer из ответа
+        parsed = parse_llm_response(llm_text)
+        answer_text = (parsed["answer"] if parsed["type"] == "final_answer"
+            else llm_text.strip())
+        # Убираем плейсхолдеры виджетов, для которых нет данных в кэше
+        # (чтобы не вылезало «No cached data for tool X» в финальном ответе)
+        answer_text = self._drop_unserviced_widget_placeholders(answer_text)
+        return self._postprocess_final_answer(answer_text)
+
+    def _drop_unserviced_widget_placeholders(self, final_answer: str) -> str:
+        """ Удаляет плейсхолдеры <!-- SYSTEM_WIDGET --> для которых нет данных
+        в data_cache. Возвращает текст с заменой таких плейсхолдеров на
+        короткий комментарий для отладки (виден в raw_answer, не виден в UI) """
+        registry = self._build_intent_registry()
+        # Найдём все плейсхолдеры и отфильтруем проблемные
+        pattern = re.compile(
+            r"<!--\s*SYSTEM_WIDGET\s*:\s*(?P<intent>[^|]+?)\s*\|\s*"
+            r"FILTER:\s*(?P<filter>[^|]+?)\s*\|\s*"
+            r"TITLE:\s*(?P<title>.*?)\s*-->",
+            re.DOTALL)
+
+        def _replace(m: re.Match) -> str:
+            intent_name = m.group("intent").strip()
+            intent_name = intent_name.replace("_ ", "_").replace(" _", "_")
+            if intent_name not in registry:
+                from difflib import get_close_matches
+                matches = get_close_matches(
+                    intent_name, list(registry.keys()), n=1, cutoff=0.7)
+                if matches:
+                    intent_name = matches[0]
                 else:
-                    try:
-                        action_input = json.loads(parsed["action_input"])
-                        # TODO: Это спорно, повторные вызовы могут ть, наверное не позволять повторные ПОДРЯД
-                        # ЗАЩИТА ОТ ДУБЛЬ-ВЫЗОВА: считаем, сколько раз этот tool
-                        # вызывался с такими же аргументами
-                        call_sig = (parsed["action"], json.dumps(action_input, sort_keys=True))
-                        call_count = self._tool_call_counts.get(call_sig, 0)
-                        if call_count >= 1:
-                            # Уже вызывался. Считаем повторный вызов
-                            self._tool_call_counts[call_sig] = call_count + 1
-                            print(f"[DEDUP] Инструмент {parsed['action']} вызывается "
-                                  f"повторно (попытка #{call_count + 1})")
-                            if call_count >= 2:
-                                # 3-я+ попытка -> ПРИНУДИТЕЛЬНЫЙ Final Answer.
-                                # LLM зациклилась, ждать дальше бессмысленно
-                                print("[DEDUP] 3+ вызова одного инструмента → "
-                                      "ПРИНУДИТЕЛЬНЫЙ Final Answer")
-                                forced_answer = (
-                                    "На основе полученных данных формирую ответ.\n\n"
-                                    "ВНИМАНИЕ: вы попытались вызвать инструмент "
-                                    f"'{parsed['action']}' уже {call_count + 1} раз с "
-                                    "одинаковыми аргументами. Это зацикливание. "
-                                    "Используйте ТОЛЬКО данные, которые уже есть в "
-                                    "предыдущих Observation. Проанализируйте их сами "
-                                    "(не вызывайте инструменты) и выдайте Final Answer "
-                                    "с виджетами согласно плану.")
-                                history.append({
-                                    "role": "user",
-                                    "content": f"Observation: {forced_answer}"})
-                                continue
-                            # 2-я попытка -> возвращаем кэш + ПРЕДУПРЕЖДЕНИЕ
-                            cached_obs = self._tool_call_history[call_sig]
-                            warning = (
-                                "\n\n[СИСТЕМНОЕ ПРЕДУПРЕЖДЕНИЕ] Вы уже вызывали "
-                                f"инструмент '{parsed['action']}' с аргументами "
-                                f"{action_input}. Данные выше — это ТОТ ЖЕ результат. "
-                                "НЕ ВЫЗЫВАЙТЕ этот инструмент снова. "
-                                "Переходите к СЛЕДУЮЩЕМУ шагу плана или к Final Answer. "
-                                "Анализ (подсчёт периодов, сравнение порогов) "
-                                "делайте В Thought сами, а не через вызов инструмента.")
-                            observation = cached_obs + warning
-                        else:
-                            # Первый вызов - реальный MCP-запрос
-                            self._tool_call_counts[call_sig] = 1
-                            print(f"Вызов инструмента: {parsed['action']}")
-                            print(f"Аргументы: {json.dumps(action_input, ensure_ascii=False)}")
-                            session = self.mcp_sessions[tool["server"]]
-                            print(f"Вызов MCP-сервера: {tool['server']}...")
-                            result = await session.call_tool(parsed["action"], action_input)
-                            observation = "\n".join([
-                                str(item.text) if hasattr(item, 'text') else str(item)
-                                for item in result.content])
-                            # Сохраняем в историю вызовов (сырой, до модификаций)
-                            self._tool_call_history[call_sig] = observation
-                        # Извлекаем сырые данные в кеш
-                        try:
-                            obs_json = json.loads(observation)
-                            if "_raw_data" in obs_json:
-                                self.data_cache[parsed["action"]] = obs_json["_raw_data"]
-                                del obs_json["_raw_data"]
-                                observation = json.dumps(obs_json, ensure_ascii=False, indent=2)
-                                print(f"[CACHE] Сохранено {len(self.data_cache[parsed['action']])} строк для {parsed['action']}")
-                        except json.JSONDecodeError:
-                            pass
-                        print(f"\n{'='*60}")
-                        print(f"СЫРОЙ ОТВЕТ ОТ MCP-СЕРВЕРА (ПОСЛЕ ИЗВЛЕЧЕНИЯ КЭША):")
-                        print(observation[:1500] + ("..." if len(observation) > 1500 else ""))
-                        print(f"{'='*60}\n")
-                    except json.JSONDecodeError:
-                        print(f"Ошибка парсинга JSON в Action Input: {parsed['action_input']}")
-                        observation = f"Error: Invalid JSON in Action Input."
-                    except Exception as e:
-                        print(f"Ошибка выполнения инструмента: {e}")
-                        import traceback
-                        traceback.print_exc()
-                        observation = f"Error executing tool: {str(e)}"
-                display_obs = observation if len(observation) < 600 else observation[:600] + "\n...[обрезано для консоли]..."
-                print(f"Observation (для консоли):\n{display_obs}")
-                print(f"\n{'='*60}")
-                print(f"ПЕРЕДАЁТСЯ В LLM КАК OBSERVATION:")
-                print(f"Размер: {len(observation)} символов")
-                print(f"{'='*60}\n")
-                history.append({"role": "user", "content": f"Observation: {observation}"})
-        return "Превышено количество итераций."
+                    # Неизвестный intent, оставим, рендер сам сообщит
+                    return m.group(0)  
+            reg = registry[intent_name]
+            if reg["widget_type"] in ("action_card", "ActionCard"):
+                # Особый виджет, не трогаем
+                return m.group(0)  
+            tool_name = reg["tool_name"]
+            if not tool_name or tool_name not in self.data_cache:
+                print(f"[STATELESS] Удаляю плейсхолдер виджета '{intent_name}': "
+                      f"нет данных от инструмента '{tool_name}'")
+                return f"<!-- Widget '{intent_name}' опущен: нет данных от инструмента '{tool_name}' -->"
+            return m.group(0)
+
+        return pattern.sub(_replace, final_answer)
 
 async def main():
     agent = PmIqAgent()
     try:
         await agent.initialize()
+        print(f"\n[CONFIG] LOOP_MODE = {LOOP_MODE!r}\n")
         queries = [
-            # "Покажи активные риски с высоким воздействием для проекта 'Миграция ERP' и предложи план реагирования, ответь с диаграммой."
             "Проанализируй загрузку команды разработки, ответь с диаграммой."
-            # # Простой запрос (должен выбрать 1 плагин)
-            # "Каков текущий статус критического пути по проекту 'Миграция ERP' и есть ли задержки?",
-            # # Кросс-доменный запрос (должен выбрать 2-3 плагина: core + value + risk)
-            # "Как 5-дневная задержка в проекте 'Миграция ERP' повлияет на бюджет и какие есть связанные с этим риски?",
-            # # Запрос к ресурсам
-            # "Есть ли перегрузка ресурсов в команде разработки на следующей неделе?"
         ]
         for q in queries:
             await agent.run(q)
@@ -1274,6 +1660,6 @@ async def main():
         await agent.close()
 
 if __name__ == "__main__":
-    if sys.platform == 'win32':
+    if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     asyncio.run(main())
