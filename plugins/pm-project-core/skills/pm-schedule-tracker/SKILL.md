@@ -14,11 +14,13 @@ available_widgets:
   - type: BarChart
     intents:
       - name: schedule_variance_by_phase
+        tool: get_wbs_structure
         description: >
           Отклонение от базового плана по фазам/этапам в днях (schedule variance).
           Используй, когда нужно показать КАКИЕ фазы отстают и насколько.
           Положительные столбцы = опережение, отрицательные = задержка.
           Цвет: красный при задержке > 5 дней, жёлтый 1–5 дней, зелёный = опережение.
+          Всегда пиши для этого виджета FILTER: {} (или фильтр по проекту, если нужен).
         config:
           x: wbs_name
           y: variance_days
@@ -30,10 +32,12 @@ available_widgets:
           reference_line: {value: 0, label: "Базовый план"}
 
       - name: milestone_status_overview
+        tool: get_milestone_status
         description: >
           Обзор вех проекта: статус каждой вехи (Achieved / On Track / At Risk / Delayed)
           с датами. Используй для общего статусного отчёта по расписанию.
           Цвет по статусу. Ось X — вехи, ось Y — отставание в днях от целевой даты.
+          Всегда пиши для этого виджета FILTER: {} (или фильтр по проекту, если нужен).
         config:
           x: milestone_name
           y: variance_days
@@ -45,11 +49,13 @@ available_widgets:
             - {value: "Delayed",   color: "#ee6666"}
 
       - name: completion_progress
+        tool: get_wbs_structure
         description: >
           Прогресс выполнения по пакетам работ WBS (% завершения).
           Используй для ответа на вопрос "насколько сделана работа по каждому разделу".
           Горизонтальные столбцы, отсортированы по % завершения.
           Цвет: зелёный > 80%, жёлтый 40–80%, красный < 40%.
+          Всегда пиши для этого виджета FILTER: {} (или фильтр по проекту, если нужен).
         config:
           x: completion_pct
           y: wbs_name

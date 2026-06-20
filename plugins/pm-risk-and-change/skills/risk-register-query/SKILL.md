@@ -42,15 +42,17 @@ available_widgets:
             "data_rows": []
           }
         config: {}
+        
   - type: ScatterChart
     intents:
       - name: risk_matrix_priority
+        tool: get_risk_register
         description: >
-          Матрица рисков: ось X — вероятность, ось Y — воздействие...
+          Матрица рисков: ось X — вероятность, ось Y — воздействие.
+          Размер точки пропорционален стоимостному воздействию (estimated_cost_impact).
           Используй для ответа на вопрос "КАКИЕ риски наиболее опасны".
-          **ПРАВИЛО ФИЛЬТРАЦИИ:** Если в data_rows есть поле `period`, 
-          для данного виджета ты ДОЛЖЕН включить в data_rows ТОЛЬКО строки, 
-          где `period = "current"`. Строки "previous" нужно исключить.
+          ВНИМАНИЕ: Система автоматически оставит ТОЛЬКО текущий период (period = "current"), 
+          исключив предыдущий. Всегда пиши для этого виджета FILTER: {} 
         config:
           x: probability_numeric
           y: impact_numeric
@@ -71,13 +73,16 @@ available_widgets:
             min: 0
             max: 4
             interval: 1
+          data_filter:
+            - {field: "period", operator: "in", value: ["current"]}
 
       - name: risk_matrix_cost_impact
+        tool: simulate_risk_impact
         description: >
-          Матрица рисков с размером точки пропорциональным стоимостному воздействию...
-          **ПРАВИЛО ФИЛЬТРАЦИИ:** Если в data_rows есть поле `period`, 
-          для данного виджета ты ДОЛЖЕН включить в data_rows ТОЛЬКО строки, 
-          где `period = "current"`. Строки "previous" нужно исключить.
+          Матрица рисков с размером точки пропорциональным стоимостному воздействию.
+          Используй для ответа на вопрос "Во сколько обойдутся риски".
+          ВНИМАНИЕ: Система автоматически оставит ТОЛЬКО текущий период (period = "current"), 
+          исключив предыдущий. Всегда пиши для этого виджета FILTER: {} 
         config:
           x: probability_numeric
           y: impact_numeric
@@ -90,13 +95,17 @@ available_widgets:
             - {value: 0, color: "#91cc75"}
           x_axis: {min: 0, max: 4, name: "Вероятность"}
           y_axis: {min: 0, max: 4, name: "Воздействие"}
+          data_filter:
+            - {field: "period", operator: "in", value: ["current"]}
 
       - name: risk_trend_shift
+        tool: simulate_risk_impact
         description: >
-          Сравнение позиций рисков между двумя периодами (было/стало)...
-          **ПРАВИЛО ФИЛЬТРАЦИИ:** Для этого виджета НЕ фильтруй данные. 
-          Копируй ВСЕ строки (и "previous", и "current"), чтобы отрисовать 
-          стрелки сдвига между периодами.
+          Сравнение позиций рисков между двумя периодами (было/стало).
+          Стрелки показывают, как изменилась вероятность и воздействие риска.
+          ВНИМАНИЕ: Система автоматически использует ОБА периода (previous и current) 
+          для отрисовки стрелок. Никакие фильтры применять не нужно. 
+          Всегда пиши для этого виджета FILTER: {} 
         config:
           x: probability_numeric
           y: impact_numeric

@@ -75,8 +75,8 @@ def convert_to_markdown_table(data: List[Dict[str, str]]) -> str:
         return "(нет данных)"
     headers = list(data[0].keys())
     header_row = "| " + " | ".join(headers) + " |"
-    separator = "|" + "|".join(["---"] * len(headers)) + "|"
-    rows = ["| " + " | ".join(str(row.get(h, "")) for h in headers) + " |"
+    separator  = "|" + "|".join(["---"] * len(headers)) + "|"
+    rows = ["| " + " | ".join(str(row.get(h, "") if row.get(h, "") is not None else "").replace("|", " ") for h in headers) + " |"
             for row in data]
     return "\n".join([header_row, separator] + rows)
 

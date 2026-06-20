@@ -72,7 +72,9 @@ def _build_bar_chart(rows: list[dict], cfg: dict, title: str) -> dict[str, Any]:
                     return float(parts[0]) - float(row.get(parts[1], 0))
                 except ValueError:
                     pass
-        return float(row.get(y_field, 0)) * y_scale
+        # Если график горизонтальный, числовое значение берется из поля оси X (x_field)
+        target_field = x_field if horizontal else y_field
+        return float(row.get(target_field, 0)) * y_scale
 
     categories = [str(row.get(x_field, "")) for row in rows]
     values = [get_value(row) for row in rows]
@@ -159,6 +161,17 @@ def _build_line_chart(rows: list[dict], cfg: dict, title: str) -> dict[str, Any]
             "itemStyle": {"color": color}, "data": data}
         series.append(series_item)
     ref = cfg.get("reference_line")
+    # Поддержка динамической линии из данных (reference_line_field)
+    if not ref:
+        ref_field = cfg.get("reference_line_field")
+        if ref_field and rows:
+            try:
+                # Берем значение BAC из первой строки данных
+                ref_val = float(rows[0].get(ref_field, 0))
+                ref_label = cfg.get("reference_line_label", str(ref_val))
+                ref = {"value": ref_val, "label": ref_label}
+            except (ValueError, TypeError):
+                pass
     if ref and series:
         series[0]["markLine"] = {
             "silent": True,

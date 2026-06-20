@@ -77,6 +77,8 @@ PREDEFINED_QUESTIONS = [
     PredefinedQuestion(id="6", category="Quality", text="Какие есть открытые несоответствия (NCR) и каков их статус?"),
     PredefinedQuestion(id="7", category="Cross-domain", text="Ключевые выводы по EVM."),
     PredefinedQuestion(id="8", category="Cross-domain", text="Прогноз итоговой стоимости (EAC) в трёх сценариях."),
+    PredefinedQuestion(id="8", category="Team", text="В какой команде сейчас самые низкие показатели морального климата?"),
+    PredefinedQuestion(id="8", category="Team", text="Налажено ли взаимодействие между командами на текущий момент?"),
     PredefinedQuestion(id="9", category="Resources", text="У меня появилась новая задача на 20 часов. Кто из команды может взять её без перегрузки?")]
 
 @app.get("/", response_class=HTMLResponse)

@@ -12,38 +12,19 @@ description: >
   перерасход из-за рисков → contingency reserve (pm-risk-and-change).
 
 available_widgets:
-  - type: BarChart
-    intents:
-      - name: morale_by_team
-        description: >
-          Моральный климат по командам (morale_score 0–1, отображается как 0–100%).
-          Используй для ответа на вопрос "В КАКОЙ команде проблемы с климатом".
-          Цвет: зелёный > 0.75, жёлтый 0.5–0.75, красный < 0.5.
-          Горизонтальная линия-порог на 0.7 = "зона внимания".
-        config:
-          x: team_name
-          y: morale_score
-          y_scale: 100
-          y_label: "Индекс морального климата (%)"
-          color_field: morale_score
-          thresholds:
-            - {value: 0.75, color: "#91cc75", label: "Норма"}
-            - {value: 0.5,  color: "#fac858", label: "Зона внимания"}
-            - {value: 0,    color: "#ee6666", label: "Критично"}
-          reference_line: {value: 70, label: "Порог внимания (70%)"}
   - type: LineChart
     intents:
       - name: evm_curves
+        tool: calculate_evm
         description: >
           Три кривой EVM на одном графике: PV (плановый объём), EV (освоённый объём),
           AC (фактические затраты) по периодам. Классическая S-кривая.
           Используй для ответа на вопрос "КАК РАЗВИВАЛСЯ разрыв между планом и фактом
           во времени" и для поиска точки, где началось расхождение.
           Зазор между AC и EV = перерасход. Зазор между PV и EV = отставание.
-          **ПРАВИЛО ФИЛЬТРАЦИИ ДАННЫХ:** В data_rows могут быть смешаны
-          фактические данные и прогнозы (scenario != ""). Для этого виджета
-          ты ДОЛЖЕН включить в data_rows ТОЛЬКО строки, где period начинается
-          со слова "Month". Строки с period="Forecast" нужно исключить.
+          ВНИМАНИЕ: В данных есть смешанные периоды (Month и Forecast). 
+          Система ОТФИЛЬТРУЕТ их автоматически. Тебе НЕ нужно использовать FILTER для 
+          исключения Forecast. Всегда пиши для этого виджета FILTER: {} 
         config:
           x: period
           series:
@@ -52,8 +33,11 @@ available_widgets:
             - {field: ac, label: "AC (факт затрат)", color: "#ee6666", line_type: solid}
           y_label: "Сумма (руб.)"
           tooltip: "period + все три значения"
+          data_filter:
+            - {field: "period", operator: "starts_with", value: "Month"}
 
       - name: cpi_spi_trend
+        tool: calculate_evm
         description: >
           Тренд индексов CPI и SPI по периодам. Горизонтальная линия на 1.0 = норма.
           Используй, когда нужно показать ДИНАМИКУ эффективности, а не просто
@@ -71,13 +55,19 @@ available_widgets:
           danger_zone: {below: 1.0, color: "rgba(238,102,102,0.1)"}
           y_label: "Индекс"
           y_axis: {min: 0.5, max: 1.5}
+          data_filter:
+            - {field: "period", operator: "starts_with", value: "Month"}
 
       - name: eac_forecast_scenarios
+        tool: calculate_evm
         description: >
           Прогноз итоговой стоимости (EAC) в трёх сценариях: оптимистичный,
           реалистичный (текущий CPI), пессимистичный. Горизонтальная линия = BAC (бюджет).
           Используй для ответа на вопрос "СКОЛЬКО будет стоить проект в итоге"
           и для обоснования запроса дополнительного финансирования.
+          ВНИМАНИЕ: Система автоматически оставит ТОЛЬКО строки со сценариями 
+          (optimistic, realistic, pessimistic), исключив фактические месяцы. 
+          Всегда пиши для этого виджета FILTER: {}
         config:
           x: scenario
           y: eac_value
@@ -90,6 +80,8 @@ available_widgets:
             - {value: "pessimistic", color: "#ee6666", label: "Пессимистичный"}
           reference_line_field: bac
           reference_line_label: "BAC (утверждённый бюджет)"
+          data_filter:
+            - {field: "scenario", operator: "in", value: ["optimistic", "realistic", "pessimistic"]}
 ---
 
 # EVM and Value Analyzer

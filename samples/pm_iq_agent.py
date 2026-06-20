@@ -38,7 +38,7 @@ _MODE_DISPATCH = {
 
 PM_IQ_ROOT = Path(__file__).parent.parent
 
-LLM_BASE_URL = "http://localhost:3101/v1"
+LLM_BASE_URL = "http://localhost:3105/v1"
 LLM_MODEL_NAME = "local-model"
 _MAX_TOKENS = 8096
 _TEMPERATURE = 0.1
@@ -275,11 +275,11 @@ class PmIqAgent:
         # Если в запросе есть упоминание проекта, 
         # принудительно добавляем pm-project-core,
         # чтобы агент получил identify_project
-        project_triggers = ["проект", "project", "внедрени", "стройк", "мобилк", "цод", "миграц", "фаза"]
-        if any(trigger in query.lower() for trigger in project_triggers):
-            if "pm-project-core" not in valid_plugins:
-                valid_plugins.append("pm-project-core")
-                print(f"[HARD ROUTE] Обнаружен контекст проекта. Принудительно добавлен pm-project-core")
+        # project_triggers = ["проект", "project", "фаза"]
+        # if any(trigger in query.lower() for trigger in project_triggers):
+        #     if "pm-project-core" not in valid_plugins:
+        #         valid_plugins.append("pm-project-core")
+        #         print(f"[HARD ROUTE] Обнаружен контекст проекта. Принудительно добавлен pm-project-core")
         print(f"Маршрутизация: выбраны плагины {valid_plugins}")
         return valid_plugins
 
@@ -344,12 +344,12 @@ class PmIqAgent:
                     for intent in widget_def.get("intents", []):
                         intent_name = intent.get("name")
                         if intent_name:
-                            tool_name = None
-                            skill_path = skill.get("path")
-                            if skill_path:
-                                csvs = list(skill_path.glob("*.csv"))
-                                if csvs:
-                                    tool_name = csvs[0].stem
+                            # Берем инструмент из YAML (если указали), иначе fallback на имя интента.
+							# TODO: Это паллиатив - виджет иллюстрирует тул.
+							# Возможно разумно для виджетов данные получать из их собственных источников
+                            tool_name = intent.get("tool")
+                            if not tool_name and w_type not in ("action_card", "ActionCard"):
+                                tool_name = intent_name 
                             registry[intent_name] = {
                                 "widget_type": w_type,
                                 "config": intent.get("config", {}),
@@ -424,17 +424,18 @@ class PmIqAgent:
                     raw_data = self.data_cache[tool_name]
                     description = reg["description"]
                     filtered = raw_data
-                    if 'period начинается со слова "month"' in description:
-                        filtered = [r for r in filtered
-                                    if r.get("period", "").lower().startswith("month")]
-                    elif "forecast" in description and "eac" in description:
-                        filtered = [r for r in filtered
-                                    if r.get("scenario", "").strip() not in ("", "actual")]
+                    # data_filter_fields - под контролем YAML
+                    widget_data_filters = reg.get("config", {}).get("data_filter", [])
+                    data_filter_fields = {rule.get("field", "").lower() for rule in widget_data_filters if rule.get("field")}
                     if filter_rules:
                         temp_filtered = []
                         for row in filtered:
                             match = True
                             for key, value in filter_rules.items():
+                                # Пропускаем поле (если задала LLM),
+                                # если оно под контролем YAML (приоритет у YAML)
+                                if key.lower() in data_filter_fields:
+                                    continue
                                 row_val = str(row.get(key, ""))
                                 if isinstance(value, dict):
                                     continue
@@ -454,6 +455,29 @@ class PmIqAgent:
                             if match:
                                 temp_filtered.append(row)
                         filtered = temp_filtered
+                    if widget_data_filters:
+                        strictly_filtered = []
+                        for row in filtered:
+                            passes_all_filters = True
+                            for rule in widget_data_filters:
+                                field_val = str(row.get(rule.get("field", ""), "")).lower()
+                                operator = rule.get("operator", "eq")
+                                rule_val = rule.get("value", "")
+                                if operator == "starts_with":
+                                    if not field_val.startswith(str(rule_val).lower()):
+                                        passes_all_filters = False
+                                        break
+                                elif operator == "in":
+                                    if field_val not in [str(v).lower() for v in rule_val]:
+                                        passes_all_filters = False
+                                        break
+                                elif operator == "not_in":
+                                    if field_val in [str(v).lower() for v in rule_val]:
+                                        passes_all_filters = False
+                                        break
+                            if passes_all_filters:
+                                strictly_filtered.append(row)
+                        filtered = strictly_filtered
                     descriptor = {
                         "widget_type": reg["widget_type"],
                         "intent": intent_name,
@@ -591,12 +615,13 @@ class PmIqAgent:
             start_idx = text.find(start_marker, last_end)
         result_parts.append(text[last_end:])
         text = "".join(result_parts)
+        # TODO: Раскомментить блок text = re...
         # Вычищаем ERROR-комментарии, которые мог оставить _render_system_widgets
-        text = re.sub(
-            r"<!--\s*ERROR:[^>]*?-->\s*",
-            "",
-            text,
-            flags=re.DOTALL)
+        # text = re.sub(
+        #     r"<!--\s*ERROR:[^>]*?-->\s*",
+        #     "",
+        #     text,
+        #     flags=re.DOTALL)
         # Вычищаем «Widget '...' опущен»-комментарии
         text = re.sub(
             r"<!--\s*Widget\s+'[^']*'\s+опущен:[^>]*?-->\s*",

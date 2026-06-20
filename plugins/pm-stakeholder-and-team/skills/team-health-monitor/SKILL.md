@@ -15,6 +15,7 @@ available_widgets:
   - type: BarChart
     intents:
       - name: morale_by_team
+        tool: get_feedback_summary
         description: >
           Моральный климат по командам (morale_score 0–1, отображается как 0–100%).
           Используй для ответа на вопрос "В КАКОЙ команде проблемы с климатом".
@@ -33,6 +34,7 @@ available_widgets:
           reference_line: {value: 70, label: "Порог внимания (70%)"}
 
       - name: burnout_signals_breakdown
+        tool: get_feedback_summary
         description: >
           Количество индикаторов выгорания по командам: сверхурочные, рост дефектов,
           снижение коммуникации — каждый как отдельный сегмент стека.
@@ -48,10 +50,13 @@ available_widgets:
           y_label: "Число индикаторов выгорания"
 
       - name: collaboration_health
+        tool: get_feedback_summary
         description: >
           Индекс коллаборации команды (collaboration_score 0–1) с трендовой стрелкой
           (растёт / падает по сравнению с baseline). Используй для ответа на вопрос
           "НАЛАЖЕНО ли взаимодействие между командами" и выявления информационных вакуумов.
+          ВНИМАНИЕ: Система автоматически рассчитает тренд. 
+          Всегда пиши для этого виджета FILTER: {} 
         config:
           x: team_name
           y: collaboration_score
