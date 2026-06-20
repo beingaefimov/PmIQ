@@ -1,0 +1,5 @@
+project_id,project_name,aliases,description,status
+ERP_Migration,Миграция ERP,ERP;ЭРП;миграция;внедрение ERP,Migracja systemu ERP do новой платформы,Active
+Construction_Phase1,Строительство Фаза 1,стройка;фаза 1;building,Строительство производственного корпуса,Active
+Mobile_App_Dev,Мобильное приложение,мобилка;app;mobile,Разработка мобильного приложения для клиентов,Active
+Data_Center,Центр обработки данных,ЦОД;data center;серверная,Модернизация ЦОД,Planning

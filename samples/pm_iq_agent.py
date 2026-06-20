@@ -272,6 +272,14 @@ class PmIqAgent:
         valid_plugins = list(dict.fromkeys(valid_plugins))
         if not valid_plugins:
             valid_plugins = ["pm-project-core"]
+        # Если в запросе есть упоминание проекта, 
+        # принудительно добавляем pm-project-core,
+        # чтобы агент получил identify_project
+        project_triggers = ["проект", "project", "внедрени", "стройк", "мобилк", "цод", "миграц", "фаза"]
+        if any(trigger in query.lower() for trigger in project_triggers):
+            if "pm-project-core" not in valid_plugins:
+                valid_plugins.append("pm-project-core")
+                print(f"[HARD ROUTE] Обнаружен контекст проекта. Принудительно добавлен pm-project-core")
         print(f"Маршрутизация: выбраны плагины {valid_plugins}")
         return valid_plugins
 
@@ -468,6 +476,20 @@ class PmIqAgent:
         result_parts.append(final_answer[last_end:])
         return "".join(result_parts)
 
+    def _clean_system_widget_artifacts(self, text: str) -> str:
+        """ Удаляет артефакты LLM: пустые блоки ```, 
+        которые модель часто лепит сразу после плейсхолдеров <!-- SYSTEM_WIDGET --> """
+        # Ищем паттерн: плейсхолдер, за которым сразу идут пустые кавычки (с пробелами или переносами строк).
+        # Заменяем это только на сам плейсхолдер, вырезая кавычки
+        text = re.sub(
+            r"(<!--\s*SYSTEM_WIDGET:.*?-->)(\s*\n?\s*```\s*\n?\s*```)",
+            r"\1",
+            text,
+            flags=re.DOTALL | re.IGNORECASE)
+        # На всякий случай: удаляем вообще любые пустые блоки кода в тексте (если модель напишет где-то еще)
+        text = re.sub(r"```\s*```", "", text)
+        return text
+    
     def _check_widgets_data_presence(self, final_answer: str) -> List[Dict[str, Any]]:
         """ Проверяет, что для каждого плейсхолдера <!-- SYSTEM_WIDGET -->
         в Final Answer есть данные в data_cache (т.е. питающий инструмент
@@ -590,6 +612,7 @@ class PmIqAgent:
         1) рендер системных плейсхолдеров в ECharts JSON,
         2) раскрытие JSON-дескрипторов модельных виджетов (action_card),
         3) вычистка невалидных/ошибочных плейсхолдеров (робастная страховка) """
+        text = self._clean_system_widget_artifacts(text)
         text = self._render_system_widgets(text)
         text = expand_widget_descriptors(text, render_widget)
         text = self._strip_invalid_widget_placeholders(text)
@@ -736,6 +759,14 @@ class PmIqAgent:
 Начинайте с Шага 1 плана: `Thought: ... Action: <tool> Action Input: {{}}`.
 
 КРИТИЧЕСКИ ВАЖНЫЕ ПРАВИЛА:
+
+0. **ПРАВИЛО ИДЕНТИФИКАЦИИ ПРОЕКТА (АБСОЛЮТНЫЙ ПРИОРИТЕТ):**
+   Если в вопросе пользователя УПОМИНАЕТСЯ любой проект (даже приблизительно, например "в Стройке", "по мобильному приложению"), вы ДОЛЖНЫ:
+   - ВАШ ПЕРВЫЙ ВЫЗОВ ИНСТРУМЕНТА ОБЯЗАТЕЛЬНО ДОЛЖЕН БЫТЬ: `identify_project`
+   - Action Input: {{"query": "<вставьте сюда как пользователь назвал проект>"}}
+   - Дождаться Observation с точным `project_id`.
+   - ЗАПРЕЩЕНО вызывать `get_risk_register`, `get_resource_histogram` и ЛЮБЫЕ другие инструменты, пока вы не получите `project_id` от `identify_project`!
+   - Используйте полученный `project_id` (например, "Construction_Phase1") как фильтр в следующем инструменте (например, Action Input: {{"project_name": "Construction_Phase1"}}).
 
 1. **ЦЕЛОСТНОСТЬ ДАННЫХ:**
    - Observation содержит JSON с основным полем `data` — это Markdown-таблица.

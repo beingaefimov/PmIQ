@@ -26,18 +26,37 @@ def load_csv_as_dicts(csv_path: Path) -> List[Dict[str, str]]:
         return list(csv.DictReader(f))
 
 def filter_data(
-        data: List[Dict[str, str]],
-        arguments: Dict[str, Any]) -> tuple[List[Dict[str, str]], List[str]]:
-    if not arguments:
+    data: List[Dict[str, str]],
+    arguments: Dict[str, Any],
+    tool_name: str = "") -> tuple[List[Dict[str, str]], List[str]]:
+    
+    if not data:
         return data, []
     warnings: List[str] = []
-    csv_keys = list(data[0].keys()) if data else []
+    csv_keys = list(data[0].keys())
+    # Специальная логика для нечеткого поиска проектов
+    if tool_name == "identify_project" and "query" in arguments:
+        search_term = str(arguments["query"]).strip().lower()
+        if not search_term:
+            return data, []
+        filtered = []
+        for row in data:
+            # Ищем вшивание по именам, алиасам и описанию
+            search_space = " ".join([
+                row.get("project_name", ""),
+                row.get("aliases", ""),
+                row.get("description", "")]).lower()
+            # Разбиваем алиасы по точке с запятой для точного совпадения отдельных слов
+            aliases = [a.strip().lower() for a in row.get("aliases", "").split(";") if a.strip()]
+            # Если есть точное совпадение алиаса или подстрока в общем пуле
+            if search_term in search_space or search_term in aliases:
+                filtered.append(row)
+        return filtered, warnings
+    # Стандартная логика точного фильтра для остальных инструментов
     for key in arguments:
         matched = next((k for k in csv_keys if k.lower() == key.lower()), None)
         if not matched:
-            warnings.append(
-                f"Filter key '{key}' not found in CSV columns {csv_keys}. "
-                "Filter for this key is ignored.")
+            warnings.append(f"Filter key '{key}' not found in CSV columns {csv_keys}. Filter ignored.")
     filtered = []
     for row in data:
         match = True
@@ -108,7 +127,7 @@ def main():
                 error = {"error": f"No mock data file for tool '{name}'"}
                 return [TextContent(type="text", text=json.dumps(error, ensure_ascii=False))]
             raw_data = load_csv_as_dicts(csv_path)
-            filtered_data, filter_warnings = filter_data(raw_data, arguments)
+            filtered_data, filter_warnings = filter_data(raw_data, arguments, tool_name=name)
             for w in filter_warnings:
                 print(f"[WARNING] filter_data: {w}", file=sys.stderr, flush=True)
             response: Dict[str, Any] = {

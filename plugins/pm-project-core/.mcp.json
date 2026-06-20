@@ -7,7 +7,8 @@
         "get_project_schedule",
         "get_wbs_structure",
         "get_milestone_status",
-        "get_document_approval_status"
+        "get_document_approval_status",
+        "identify_project"
       ],
       "env": {
         "JIRA_API_URL": "${JIRA_API_URL}",
