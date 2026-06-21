@@ -14,7 +14,7 @@ This is not production code! For local layer testing only, by a single user.
 
 1. **LLM Server**: `llama.cpp` запускает локальную модель (например, T-lite-it-2.1) и предоставляет OpenAI-совместимый API.
 2. **Agent (Python)**: Реализует паттерн ReAct (Reasoning and Acting). Он решает, какой инструмент вызвать, парсит ответ и формирует финальный вывод.
-3. **MCP Layer**: Python-скрипт подключается к MCP-серверу PM IQ через `stdio` и вызывает инструменты (Jira, SAP, Primavera и т.д).
+3. **MCP Layer**: Python-скрипт подключается к MCP-серверу PM IQ через `stdio` и вызывает инструменты (моки как будто из Jira, SAP, Primavera и т.д).
 4. **FastAPI + SSE**: `pm_iq_api.py` оборачивает агента в HTTP-сервер с SSE-стримингом логов в реальном времени
 
 ### Запуск llama.cpp server
