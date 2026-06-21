@@ -25,7 +25,7 @@ available_widgets: []
 ### Примеры:
 - Пользователь: "Покажи риски в Строительстве Площадки А"
   → Вызовите `identify_project(query="Строительство Площадки А")` → получите `project_id="Place_A_construction"`
-  → Затем вызовите, например `get_risk_register(project_name="Place_A_construction")`
+  → Затем вызовите, например `get_some_register(project_name="Place_A_construction")`
 
 - Пользователь: "Какие есть перегрузки в проекте по внедрению?"
   → Вызовите `identify_project(query="проект по внедрению")` → получите список кандидатов

@@ -21,24 +21,23 @@ from agent_utils import (
     extract_plan_block,
     parse_plan_steps,
     is_consecutive_duplicate,
-    make_call_signature,
-)
+    make_call_signature)
 
-# "concentrator" — исходный ReAct-цикл с историей диалога + концентратор знаний.
-# "stateless" — альтернативный цикл: повторный роутинг каждую итерацию,
-#               накопление фактических данных вместо истории, анти-луп
-#               через стек последних 2 вызовов
-LOOP_MODE = "stateless"
+# "concentrator" - ReAct-цикл с историей диалога + концентратор знаний.
+# "stateless" - повторный роутинг каждую итерацию,
+#               накопление фактических данных вместо истории,
+#               анти-loop через стек последних 2 вызовов
+LOOP_MODE = "concentrator"
 
 # Маппинг внешних имён режимов для обратной совместимости
 _MODE_DISPATCH = {
     "concentrator": "history",
-    "history":      "history",
-    "stateless":    "stateless"}
+    "history": "history",
+    "stateless": "stateless"}
 
 PM_IQ_ROOT = Path(__file__).parent.parent
 
-LLM_BASE_URL = "http://localhost:3105/v1"
+LLM_BASE_URL = "http://localhost:3102/v1"
 LLM_MODEL_NAME = "local-model"
 _MAX_TOKENS = 8096
 _TEMPERATURE = 0.1
@@ -208,6 +207,38 @@ class PmIqAgent:
         """ Выбор 1–3 релевантных плагинов по вопросу.
         В stateless-режиме в accumulated_data передаётся накопленный блок
         фактических данных, чтобы маршрутизация учитывала уже собранное """
+        """ При проектировании агентных систем с большим количеством инструментов (30+) 
+        существует дилемма: "Полнота контекста" vs "Перегрузка контекста (Context Bloat)".
+        Известные подходы:
+        Уровень 1: Мульти-плагиновый роутер (текущая реализация)
+        - Как работает: LLM сначала анализирует запрос и выбирает 1-3 релевантных плагина. 
+        Затем в ReAct-промт загружаются инструменты и инструкции только этих плагинов.
+        - Плюсы: Резкая экономия токенов (вместо 30 инструментов в промпте попадает 4-8), 
+        высокая надежность на локальных моделях (7B-8B), поддержка кросс-доменных запросов 
+        (например, "задержка и бюджет" выберет 2 плагина).
+        - Минусы: Зависит от способности LLM корректно классифицировать запрос по доменам.
+        - Условия применения: Локальные LLM, < 50 инструментов, чёткие границы доменов.
+        Уровкнь 1 bis: Добавить 1.2 уровень роутинга - после выбора плагина, LLM выбирает конкретный скилл внутри него.
+        Но только введя арбитра, оценщика выбранного скиллса и если выбор одного не очевиден (ясно, что он покрывает вопрос),
+        то оставлять все.
+        Уровень 2: Семантический поиск инструментов "RAG for Tools"
+        - Как работает: Описания всех инструментов векторизуются. При запросе 
+        выполняется семантический поиск (cosine similarity), и в промпт попадают топ(5) 
+        наиболее релевантных инструментов, независимо от того, в каком они плагине.
+        - Плюсы: Бесконечная масштабируемость (1000+ инструментов), не зависит от жестких 
+        границ плагинов, находит инструменты по смыслу, а не по названию категории.
+        - Минусы: Требует локальной модели эмбеддингов, векторного хранилища (QDrant/Chroma/FAISS), 
+        усложняет архитектуру.
+        - Условия применения: Продакшен-системы с > 50 инструментами, сильно пересекающимися доменами.
+        Уровень 3: Иерархия суб-агентов
+        - Как работает: Главный агент-диспетчер разбивает сложный запрос на подзадачи и 
+        делегирует их специализированным суб-агентам (например, "Агент расписания" и "Агент рисков"), 
+        которые общаются друг с другом.
+        - Плюсы: Глубочайшее рассуждение, автономность, решение сверхсложных задач.
+        - Минусы: Экспоненциальный рост затрат токенов, высокая задержка (latency), высокий 
+        риск зацикливания или потери контекста.
+        - Условия применения: Мощные, желательно естественные, модели (GPT-4o, Claude 3.5 Sonnet), сложные 
+        многоэтапные автономные workflow """
         plugins_summary = []
         for p in self.structure.plugins:
             skills_desc = "\n    ".join(
@@ -267,19 +298,15 @@ class PmIqAgent:
                     if any(skill["name"] == item for skill in plug["skills"]):
                         valid_plugins.append(plug["name"])
                         print(f"LLM вернула имя скилла '{item}', "
-                              f"маппим на плагин '{plug['name']}'")
+                            f"маппим на плагин '{plug['name']}'")
                         break
         valid_plugins = list(dict.fromkeys(valid_plugins))
         if not valid_plugins:
             valid_plugins = ["pm-project-core"]
-        # Если в запросе есть упоминание проекта, 
-        # принудительно добавляем pm-project-core,
-        # чтобы агент получил identify_project
-        # project_triggers = ["проект", "project", "фаза"]
-        # if any(trigger in query.lower() for trigger in project_triggers):
-        #     if "pm-project-core" not in valid_plugins:
-        #         valid_plugins.append("pm-project-core")
-        #         print(f"[HARD ROUTE] Обнаружен контекст проекта. Принудительно добавлен pm-project-core")
+        # Принудительно добавляем pm-project-core, как базу
+        if "pm-project-core" not in valid_plugins:
+            valid_plugins.append("pm-project-core")
+            print(f"[HARD ROUTE] Принудительно добавлен pm-project-core")
         print(f"Маршрутизация: выбраны плагины {valid_plugins}")
         return valid_plugins
 
@@ -424,6 +451,11 @@ class PmIqAgent:
                     raw_data = self.data_cache[tool_name]
                     description = reg["description"]
                     filtered = raw_data
+                    # Защита от мусорных ключей фильтров, которые может сгенерировать LLM
+                    # TODO: Здесь valid_csv_keys - привязка к моковым файлам (csv) - избавляться
+                    valid_csv_keys = set(raw_data[0].keys()) if raw_data else set()
+                    if filter_rules and valid_csv_keys:
+                        filter_rules = {k: v for k, v in filter_rules.items() if k.lower() in valid_csv_keys}
                     # data_filter_fields - под контролем YAML
                     widget_data_filters = reg.get("config", {}).get("data_filter", [])
                     data_filter_fields = {rule.get("field", "").lower() for rule in widget_data_filters if rule.get("field")}
@@ -510,8 +542,6 @@ class PmIqAgent:
             r"\1",
             text,
             flags=re.DOTALL | re.IGNORECASE)
-        # На всякий случай: удаляем вообще любые пустые блоки кода в тексте (если модель напишет где-то еще)
-        text = re.sub(r"```\s*```", "", text)
         return text
     
     def _check_widgets_data_presence(self, final_answer: str) -> List[Dict[str, Any]]:
@@ -790,7 +820,6 @@ class PmIqAgent:
    - ВАШ ПЕРВЫЙ ВЫЗОВ ИНСТРУМЕНТА ОБЯЗАТЕЛЬНО ДОЛЖЕН БЫТЬ: `identify_project`
    - Action Input: {{"query": "<вставьте сюда как пользователь назвал проект>"}}
    - Дождаться Observation с точным `project_id`.
-   - ЗАПРЕЩЕНО вызывать `get_risk_register`, `get_resource_histogram` и ЛЮБЫЕ другие инструменты, пока вы не получите `project_id` от `identify_project`!
    - Используйте полученный `project_id` (например, "Construction_Phase1") как фильтр в следующем инструменте (например, Action Input: {{"project_name": "Construction_Phase1"}}).
 
 1. **ЦЕЛОСТНОСТЬ ДАННЫХ:**
@@ -909,10 +938,41 @@ class PmIqAgent:
                 continue
 
             if parsed["type"] == "thought":
+                # # TODO: Механизм прощения. Мб отключать для моделей с большим B.
+                # # Если модель забыла "Final Answer:", но в тексте есть 
+                # # плейсхолдеры системных виджетов или JSON-блоки action_card, 
+                # # значит она уже выдала готовый ответ, не заставляем её переписывать
+                # is_likely_final = False
+                # if "<!-- SYSTEM_WIDGET" in llm_text:
+                #     is_likely_final = True
+                # elif "```json" in llm_text and '"widget_type"' in llm_text:
+                #     is_likely_final = True
+                # if is_likely_final:
+                #     print("[RECOVERY] LLM забыла префикс 'Final Answer:', "
+                #           "но сгенерировала виджеты. Принимаем ответ как финальный.")
+                #     # Проверяем галлюцинации
+                #     # hallucinated = detect_hallucinations(llm_text, observations)
+                #     # if hallucinated:
+                #     #     print(f"ВНИМАНИЕ: Потенциальные галлюцинации: {hallucinated}")
+                #     final_text = self._postprocess_final_answer(llm_text)
+                #     print(f"Финальный ответ:\n{final_text}\n")
+                #     return final_text
+
+                # TODO: Оставить вариант 1, но дополнять (выяснять) слишком краткие вопросы пользователя
+                # (профилем пользователя, траекторией, ...)
+                # Этот вариант для плолхо отлаженной системы - заставлет искать выход,
+                # но может привести к зацикливанию                
                 history.append({"role": "user", "content": (
                     "Продолжайте. Вы написали Thought, но не сделали выбор:\n"
                     "- если данных НЕДОСТАТОЧНО — вызовите инструмент;\n"
                     "- если данных ДОСТАТОЧНО — выдайте 'Final Answer:'.")})
+                # Этот вариант для отлаженной (наполненной данными) системы - не даёт искать варианты
+                # history.append({"role": "user", "content": (
+                #     "ОШИБКА ФОРМАТА: Вы написали Thought, но не завершили его ни `Action:`, ни `Final Answer:`.\n"
+                #     "ПРАВИЛО: Если вы НЕ МОЖЕТЕ вызвать инструмент (например, в запросе не достаточно данных), "
+                #     "вам НЕЛЬЗЯ просто размышлять. Вы должны немедленно выдать:\n"
+                #     "Final Answer: Пожалуйста, уточните [что именно нужно уточнить].\n"
+                #     "Если же инструментов достаточно — вызовите их через `Action:`.")})
                 continue
 
             if parsed["type"] == "final_answer":
@@ -1070,7 +1130,7 @@ class PmIqAgent:
                 "(Пока данных нет — это первая итерация. Вызовите инструмент, "
                 "чтобы их получить.)\n")
 
-        # Предупреждение о недавних вызовах (анти-луп)
+        # Предупреждение о недавних вызовах (анти-loop)
         warning_block = recent_calls_warning or ""
 
         return f"""**КРИТИЧЕСКОЕ ПРЕДУПРЕЖДЕНИЕ: Вы работаете с РЕАЛЬНЫМИ данными из корпоративных систем (Jira, SAP, Workday и т.п.).**

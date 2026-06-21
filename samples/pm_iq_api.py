@@ -68,18 +68,21 @@ app.add_middleware(
 
 agent = PmIqAgent()
 
+# TODO: Вопросы здесь "аккуратные" - или указан проект или явно указано "по всем проектам".
+# Это мало реально практически, но рассчитываем на наличие контекста истории, профиля и тд.
+# Эксперименты показали, что простое указание "определи всегда проект" не работоспособно
 PREDEFINED_QUESTIONS = [
-    PredefinedQuestion(id="1", category="Resources", text="Проанализируй загрузку команды разработки, ответь с диаграммой."),
+    PredefinedQuestion(id="1", category="Resources", text="Проанализируй загрузку команды разработки по всем проектам, ответь с диаграммой."),
     PredefinedQuestion(id="2", category="Risks", text="Покажи активные риски с высоким воздействием для проекта 'Миграция ERP' и предложи план реагирования."),
     PredefinedQuestion(id="3", category="Cross-domain", text="Как 5-дневная задержка в проекте 'Миграция ERP' повлияет на бюджет и какие есть связанные с этим риски?"),
     PredefinedQuestion(id="4", category="Schedule", text="Каков текущий статус критического пути по проекту 'Миграция ERP' и есть ли задержки?"),
     PredefinedQuestion(id="5", category="Budget", text="Покажи отклонение бюджета по всем проектам и выяви перерасход."),
-    PredefinedQuestion(id="6", category="Quality", text="Какие есть открытые несоответствия (NCR) и каков их статус?"),
-    PredefinedQuestion(id="7", category="Cross-domain", text="Ключевые выводы по EVM."),
-    PredefinedQuestion(id="8", category="Cross-domain", text="Прогноз итоговой стоимости (EAC) в трёх сценариях."),
-    PredefinedQuestion(id="8", category="Team", text="В какой команде сейчас самые низкие показатели морального климата?"),
-    PredefinedQuestion(id="8", category="Team", text="Налажено ли взаимодействие между командами на текущий момент?"),
-    PredefinedQuestion(id="9", category="Resources", text="У меня появилась новая задача на 20 часов. Кто из команды может взять её без перегрузки?")]
+    PredefinedQuestion(id="6", category="Quality", text="Какие есть открытые несоответствия (NCR) по всем проектам и каков их статус?"),
+    PredefinedQuestion(id="7", category="Cross-domain", text="Ключевые выводы по EVM в проекте 'Миграция ERP'."),
+    PredefinedQuestion(id="8", category="Cross-domain", text="Прогноз итоговой стоимости (EAC) в трёх сценариях в проекте 'Миграция ERP'."),
+    PredefinedQuestion(id="8", category="Team", text="В какой команде по всем проектам сейчас самые низкие показатели морального климата?"),
+    PredefinedQuestion(id="8", category="Team", text="Налажено ли взаимодействие между командами по всем проектам на текущий момент?"),
+    PredefinedQuestion(id="9", category="Resources", text="У меня появилась новая задача на 20 часов. Кто из команд всех проектов может взять её без перегрузки?")]
 
 @app.get("/", response_class=HTMLResponse)
 async def get_ui():

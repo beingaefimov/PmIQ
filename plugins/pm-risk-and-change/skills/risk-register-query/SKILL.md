@@ -77,7 +77,7 @@ available_widgets:
             - {field: "period", operator: "in", value: ["current"]}
 
       - name: risk_matrix_cost_impact
-        tool: simulate_risk_impact
+        tool: get_risk_register
         description: >
           Матрица рисков с размером точки пропорциональным стоимостному воздействию.
           Используй для ответа на вопрос "Во сколько обойдутся риски".

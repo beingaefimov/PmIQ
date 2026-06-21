@@ -143,6 +143,18 @@ class SkillConcentrator:
             query=query, skills_content=skills_content)
         loop = asyncio.get_event_loop()
 
+        # ДИНАМИЧЕСКИЙ РАСЧЕТ LIMMITA ДЛЯ ОТВЕТА
+        # CONTEXT_WINDOW_SIZE = 14000
+        # SAFETY_BUFFER = 400 # Оставляем немного места на неточности подсчета токенов
+        # # Быстрая оценка: 1 токен ~ 4 символа для английского, ~2.5 для русского.
+        # # Берем усредненный коэффициент 3.5 для нашего микса
+        # history_chars = sum(len(msg["content"]) for msg in history)
+        # estimated_input_tokens = int(history_chars / 3.5)
+        # remaining_tokens = CONTEXT_WINDOW_SIZE - estimated_input_tokens - SAFETY_BUFFER
+        # if remaining_tokens < 500:
+        #     print("КРИТИЧЕСКОЕ ПРЕДУПРЕЖДЕНИЕ: История почти заполнила контекстное окно. Принудительное завершение.")
+        #     return "История диалога слишком велика для данного окна модели."
+        # dynamic_max_tokens = min(8096, remaining_tokens) # Ограничиваем сверху разумным пределом
         def sync_call():
             return self.llm_client.chat.completions.create(
                 model=self.llm_model_name,
@@ -161,7 +173,6 @@ class SkillConcentrator:
             print("[Concentrator] JSON parse failed even after robust cleanup.")
             print(f"[Concentrator] RAW OUTPUT (first 800 chars):\n{raw[:800]}")
             return self._build_fallback_context(skills_content, selected_plugins, raw)
-
         # Верификация виджетов
         intent_index = {w["intent"]: w for w in widgets_catalog}
         verified_widgets: List[Dict[str, Any]] = []
@@ -181,8 +192,7 @@ class SkillConcentrator:
                     "required": True})
             else:
                 print(f"[Concentrator] WARN: LLM picked unknown intent '{intent_name}', dropped.")
-
-        # Force включаем особые виджеты
+        # Force включаем особые виджеты из SPECIAL_WIDGET_TYPES
         already_planned_intents = {w["intent"] for w in verified_widgets}
         force_included = []
         for plugin in self.structure.plugins:
@@ -213,10 +223,8 @@ class SkillConcentrator:
                               f"(type: {w_type}) из {skill['name']}")
         if force_included:
             print(f"[Concentrator] Принудительно добавлено особых виджетов: {force_included}")
-
         valid_tool_names = {t["name"] for t in active_tools}
         planned_tools = [t for t in parsed.get("planned_tools", []) if t in valid_tool_names]
-
         orig_size = len(skills_content)
         new_size = (len(parsed.get("concentrated_knowledge", ""))
                     + len(parsed.get("plan", "")))
@@ -225,7 +233,6 @@ class SkillConcentrator:
         print(f"[Concentrator] Запланировано инструментов: {planned_tools}")
         print(f"[Concentrator] Запланировано виджетов: "
               f"{[w['intent'] for w in verified_widgets]}")
-
         return ConcentratedContext(
             concentrated_knowledge=parsed.get("concentrated_knowledge", "").strip(),
             planned_tools=planned_tools,

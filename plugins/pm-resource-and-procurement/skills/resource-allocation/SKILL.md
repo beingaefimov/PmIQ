@@ -15,6 +15,7 @@ available_widgets:
   - type: BarChart
     intents:
       - name: overload_by_person
+        tool: get_resource_histogram
         description: >
           Загрузка по конкретным людям с выделением зон перегрузки.
           Используй, когда нужно ответить на вопрос "КТО перегружен".
@@ -31,6 +32,7 @@ available_widgets:
           reference_line: {value: 100, label: "Предел 100%"}
 
       - name: load_by_role
+        tool: get_resource_histogram
         description: >
           Загрузка агрегированно по ролям (средняя % по роли).
           Используй, когда нужно ответить на вопрос "КАКАЯ РОЛЬ является узким местом"
@@ -46,6 +48,7 @@ available_widgets:
             - {value: "Normal",        color: "#5470c6"}
 
       - name: availability_gap
+        tool: get_resource_histogram
         description: >
           Доступный резерв мощности по ролям (100% − allocation_pct).
           Используй, когда нужно найти свободные ресурсы для новой задачи.
