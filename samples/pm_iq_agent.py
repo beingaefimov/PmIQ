@@ -938,45 +938,69 @@ class PmIqAgent:
                 continue
 
             if parsed["type"] == "thought":
-                # # TODO: Механизм прощения. Мб отключать для моделей с большим B.
-                # # Если модель забыла "Final Answer:", но в тексте есть 
-                # # плейсхолдеры системных виджетов или JSON-блоки action_card, 
-                # # значит она уже выдала готовый ответ, не заставляем её переписывать
-                # is_likely_final = False
-                # if "<!-- SYSTEM_WIDGET" in llm_text:
-                #     is_likely_final = True
-                # elif "```json" in llm_text and '"widget_type"' in llm_text:
-                #     is_likely_final = True
-                # if is_likely_final:
-                #     print("[RECOVERY] LLM забыла префикс 'Final Answer:', "
-                #           "но сгенерировала виджеты. Принимаем ответ как финальный.")
-                #     # Проверяем галлюцинации
-                #     # hallucinated = detect_hallucinations(llm_text, observations)
-                #     # if hallucinated:
-                #     #     print(f"ВНИМАНИЕ: Потенциальные галлюцинации: {hallucinated}")
-                #     final_text = self._postprocess_final_answer(llm_text)
-                #     print(f"Финальный ответ:\n{final_text}\n")
-                #     return final_text
-
-                # TODO: Оставить вариант 1, но дополнять (выяснять) слишком краткие вопросы пользователя
-                # (профилем пользователя, траекторией, ...)
-                # Этот вариант для плолхо отлаженной системы - заставлет искать выход,
-                # но может привести к зацикливанию                
+                # Механизм прощения: LLM забыла "Final Answer:", но сгенерировала виджеты
+                is_likely_final = (
+                    "<!-- SYSTEM_WIDGET" in llm_text
+                    or ("```json" in llm_text and '"widget_type"' in llm_text))
+                if is_likely_final:
+                    print("[RECOVERY] LLM забыла префикс 'Final Answer:', "
+                        "но сгенерировала виджеты. Извлекаем чистый ответ...")
+                    answer_candidate = llm_text
+                    # Убираем начальный "Thought:"
+                    answer_candidate = re.sub(r'^\s*thought\s*:\s*', '', answer_candidate, flags=re.IGNORECASE)
+                    # Если в тексте после "Thought:" есть разделитель (---),
+                    # то всё, что до него - это размышления.
+                    # Берем всё, что после первого разделителя.
+                    # Да, это грубый разбор, но мы и так в режиме "спасения".
+                    # TODO: Лучшим вариантом выглядит отдать весь этот сломанный ответ другой модели
+                    # с контекстом для переформулирования в правильном формате
+                    lines = answer_candidate.split('\n')
+                    cut_index = -1
+                    for i, line in enumerate(lines):
+                        stripped = line.strip()
+                        # Проверяем, является ли строка блочным разделителем (---, ***, ___)
+                        # и при этом не является ли она частью таблицы (исключаем наличие '|')
+                        if stripped in ('---', '***', '___') and '|' not in stripped:
+                            head = "\n".join(lines[:i])
+                            # Если в отрезаемой части нет виджетов, то отрезаем здесь
+                            if "<!-- SYSTEM_WIDGET" not in head and "```json" not in head:
+                                cut_index = i + 1
+                                break
+                    if cut_index != -1:
+                        answer_candidate = "\n".join(lines[cut_index:]).strip()
+                    else:
+                        # Если разделителя нет, пытаемся найти начало ответа по двойному переносу строки.
+                        # LLM обычно пишет Thought абзацем, делает отступ, и начинает ответ
+                        parts = answer_candidate.split("\n\n", 1)
+                        if len(parts) > 1:
+                            head = parts[0]
+                            # Опять же, не отрезаем, если в первой части уже успели появиться виджеты
+                            if "<!-- SYSTEM_WIDGET" not in head and "```json" not in head:
+                                answer_candidate = parts[1].strip()      
+                    final_text = self._postprocess_final_answer(answer_candidate)
+                    print(f"Финальный ответ:\n{final_text}\n")
+                    return final_text
                 history.append({"role": "user", "content": (
                     "Продолжайте. Вы написали Thought, но не сделали выбор:\n"
                     "- если данных НЕДОСТАТОЧНО — вызовите инструмент;\n"
                     "- если данных ДОСТАТОЧНО — выдайте 'Final Answer:'.")})
-                # Этот вариант для отлаженной (наполненной данными) системы - не даёт искать варианты
-                # history.append({"role": "user", "content": (
-                #     "ОШИБКА ФОРМАТА: Вы написали Thought, но не завершили его ни `Action:`, ни `Final Answer:`.\n"
-                #     "ПРАВИЛО: Если вы НЕ МОЖЕТЕ вызвать инструмент (например, в запросе не достаточно данных), "
-                #     "вам НЕЛЬЗЯ просто размышлять. Вы должны немедленно выдать:\n"
-                #     "Final Answer: Пожалуйста, уточните [что именно нужно уточнить].\n"
-                #     "Если же инструментов достаточно — вызовите их через `Action:`.")})
                 continue
-
+            
             if parsed["type"] == "final_answer":
                 answer_text = parsed["answer"]
+                # Эвристика: если ответ подозрительно короткий и не содержит виджетов 
+                # или маркеров данных - модель сломалась (выдала "Completed" и тп)
+                stripped_answer = answer_text.strip()
+                has_widgets = ("```json" in stripped_answer 
+                    or "<!-- SYSTEM_WIDGET" in stripped_answer 
+                    or "```echarts" in stripped_answer)
+                if len(stripped_answer) < 20 and not has_widgets:
+                    history.append({"role": "assistant", "content": llm_text})
+                    history.append({"role": "user", "content": (
+                        "ОШИБКА: Ваш Final Answer слишком краток или пуст. "
+                        "Проанализируйте данные из Observation и сформируйте "
+                        "развёрнутый текстовый ответ, начиная с 'Final Answer:'.")})
+                    continue
                 has_system_widgets = "<!-- SYSTEM_WIDGET" in answer_text
                 has_observations = any(
                     msg["role"] == "user" and msg["content"].startswith("Observation:")
@@ -998,7 +1022,6 @@ class PmIqAgent:
                 print(f"Финальный ответ:\n{final_text}\n")
                 return final_text
 
-            # parsed["type"] == "action"
             action = parsed["action"]
             action_input_str = parsed["action_input"]
             # Маппинги skill→tool, plugin→tool
@@ -1190,6 +1213,8 @@ class PmIqAgent:
      шаг — подготовка финального ответа.
    - Если данных ДОСТАТОЧНО для текста И для всех запланированных
      виджетов: план состоит из ОДНОГО шага — подготовка финального ответа.
+   - ВАЖНО: План должен быть КОРОТКИМ (максимум 5-7 шагов). Не повторяйте
+     друг за другом вызовы одних и тех же инструментов в плане!
 
 5. **Правило формирования виджетов (КРИТИЧНО):**
    - НА ЛЮБОМ ШАГЕ плана, КРОМЕ последнего, вы можете ТОЛЬКО вызывать
@@ -1437,6 +1462,18 @@ Final Answer: <текст ответа>
                     print(f"  Step {s['step']}: {s['kind']}")
 
             parsed = parse_llm_response(rest_text)
+
+            # Recovery: LLM забыла Action/Final Answer (или обрезалась по max_tokens),
+            # но сгенерировала план. Извлекаем первый шаг из плана
+            if parsed["type"] == "thought" and plan_steps:
+                first_step = plan_steps[0]
+                if first_step["kind"] == "tool_call":
+                    print("[RECOVERY] LLM забыла Action, но есть план. Извлекаем первый шаг.")
+                    parsed = {
+                        "type": "action",
+                        "thought": "Извлечено из плана.",
+                        "action": first_step["tool"],
+                        "action_input": json.dumps(first_step.get("args", {}), ensure_ascii=False)}
 
             # Случай 1: модель решила, что данных достаточно - финальный ответ
             # (одношаговый план = Final Answer)

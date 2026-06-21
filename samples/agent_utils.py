@@ -320,6 +320,9 @@ def parse_plan_steps(plan_text: str) -> List[Dict[str, Any]]:
                 "step": int(m_final.group(1)),
                 "kind": "final_answer",
                 "reason": ""}
+            # TODO: 10 - в константы
+            if len(steps) >= 10:
+                break
             continue
         m_tool = _STEP_TOOL_RE.match(line)
         if m_tool:
@@ -332,7 +335,6 @@ def parse_plan_steps(plan_text: str) -> List[Dict[str, Any]]:
             try:
                 args = json.loads(args_str)
             except json.JSONDecodeError:
-                # Пробуем простить - оставить пустые аргументы
                 args = {}
             current_step = {
                 "step": num,
@@ -340,6 +342,9 @@ def parse_plan_steps(plan_text: str) -> List[Dict[str, Any]]:
                 "tool": tool,
                 "args": args,
                 "reason": reason}
+            # TODO: 10 - в константы
+            if len(steps) >= 10:
+                break
             continue
         # Многострочная причина или продолжение
         if current_step and not line.strip().startswith(("#", "//")):
@@ -347,7 +352,8 @@ def parse_plan_steps(plan_text: str) -> List[Dict[str, Any]]:
                 current_step["reason"] += " " + line.strip()
             else:
                 current_step["reason"] = line.strip()
-    if current_step:
+    # TODO: 10 - в константы
+    if current_step and len(steps) < 10:
         steps.append(current_step)
     return steps
 
