@@ -3,6 +3,9 @@ import json
 import re
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+# TODO: Здесь много хардкодных ru ключевых фраз,
+# для много-B моделей их вред может перевешивать
+
 def extract_json_block(text: str) -> str:
     """ Извлекает первый сбалансированный {...} блок из текста LLM.
     Игнорирует markdown-ограждения и сопутствующий текст """
@@ -287,11 +290,11 @@ def detect_hallucinations(final_answer: str, observations: List[str]) -> List[st
 #   "1. get_risk_register({"project_name": "ERP"}) - причина"
 #   "Step 3: Final Answer"
 _STEP_TOOL_RE = re.compile(
-    r'^\s*(?:step\s*)?(\d+)[\.\):]\s*'  # номер шага
-    r'(?:call\s+)?([A-Za-z_][\w]*)\s*'   # имя инструмента
-    r'(?:\s+with\s+args?\s*)?'  # опц. "with args"
+    r'^\s*(?:step\s*)?(\d+)[\.\):]\s*' # номер шага
+    r'(?:call\s+)?([A-Za-z_][\w]*)\s*' # имя инструмента
+    r'(?:\s+with\s+args?\s*)?' # опц. "with args"
     r'(?:(\{[^}]*\}))?' # JSON-аргументы (опц.)
-    r'\s*(?:[-—–]\s*(.*))?$'    # причина (опц.)
+    r'\s*(?:[-—–]\s*(.*))?$' # причина (опц.)
     , re.IGNORECASE)
 _STEP_FINAL_RE = re.compile(
     r'^\s*(?:step\s*)?(\d+)[\.\):]\s*'
@@ -404,8 +407,8 @@ def is_consecutive_duplicate(
         return False
     top_tool, top_args = recent_calls_stack[0]
     return (top_tool == proposed_tool
-            and make_call_signature(top_tool, top_args)
-            == make_call_signature(proposed_tool, proposed_args))
+        and make_call_signature(top_tool, top_args)
+        == make_call_signature(proposed_tool, proposed_args))
 
 def clean_broken_json(text: str) -> str:
     """ Удаляет оборванные ```json блоки, если LLM упёрлась в max_tokens """

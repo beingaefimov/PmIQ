@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, field_validator
+from pm_iq_agent import (ALLOWED_MODES, LOOP_MODE)
 
 # Импортируем агента
 sys.path.insert(0, str(Path(__file__).parent))
@@ -22,13 +23,9 @@ from pm_iq_agent import PmIqAgent
 # Хранилище активных сессий
 active_sessions: Dict[str, Dict] = {}
 
-# Допустимые режимы работы (значения, которые может прислать фронтенд)
-ALLOWED_MODES = ("concentrator", "stateless")
-DEFAULT_MODE = "concentrator"
-
 class QuestionRequest(BaseModel):
     query: str
-    mode: str = DEFAULT_MODE
+    mode: str = LOOP_MODE
 
     @field_validator("mode")
     @classmethod
@@ -74,7 +71,7 @@ agent = PmIqAgent()
 PREDEFINED_QUESTIONS = [
     PredefinedQuestion(id="1", category="Resources", text="Проанализируй загрузку команды разработки по всем проектам, ответь с диаграммой."),
     PredefinedQuestion(id="2", category="Risks", text="Покажи активные риски с высоким воздействием для проекта 'Миграция ERP' и предложи план реагирования."),
-    PredefinedQuestion(id="3", category="Cross-domain", text="Как 5-дневная задержка в проекте 'Миграция ERP' повлияет на бюджет и какие есть связанные с этим риски?"),
+    PredefinedQuestion(id="3", category="Cross-domain", text="Как ЕЩЁ ОДНА 5-дневная задержка в проекте 'Миграция ERP' повлияет на бюджет и какие есть связанные с этим риски?"),
     PredefinedQuestion(id="4", category="Schedule", text="Каков текущий статус критического пути по проекту 'Миграция ERP' и есть ли задержки?"),
     PredefinedQuestion(id="5", category="Budget", text="Покажи отклонение бюджета по всем проектам и выяви перерасход."),
     PredefinedQuestion(id="6", category="Quality", text="Какие есть открытые несоответствия (NCR) по всем проектам и каков их статус?"),
@@ -102,7 +99,7 @@ async def get_modes() -> Dict[str, Any]:
     """ Возвращает список доступных режимов работы агента.
     Фронт использует для построения переключателя """
     return {
-        "default": DEFAULT_MODE,
+        "default": LOOP_MODE,
         "modes": [
             {
                 "id": "concentrator",
