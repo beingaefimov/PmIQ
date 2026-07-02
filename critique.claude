@@ -1,0 +1,312 @@
+Посмотрел проект — это **PM IQ Universal Edition**: маркетплейс MCP-плагинов для управления проектами (7 плагинов, 23+ скиллов, ReAct-агент на локальной LLM, FastAPI + SSE-стриминг, HTML/ECharts UI), сейчас работающий на CSV-моках с явным планом перехода на реальные Jira/SAP/ServiceNow API. Архитектура декларативная и продумана (SKILL.md → .mcp.json → CSV, агент "не трогаем" при добавлении скиллов) — это сильная сторона. Но нашёл несколько действительно важных проблем, до перехода на реальные API особенно критичных.
+
+## 🔴 Критично — до подключения реальных API
+
+**1. XSS через `marked.parse()` + `innerHTML` (samples/ui/index.html, ~строка 5790)**
+```js
+responseContent.innerHTML = marked.parse(data.answer);
+```
+Ответ LLM вставляется как HTML без санитизации (нет DOMPurify). Сейчас источник данных — доверенные CSV, но как только в контекст попадут реальные тикеты Jira/SAP, любое поле типа `summary` с payload'ом вроде `<img src=x onerror=...>` может дойти до LLM и быть отражено в ответе → выполнится в браузере пользователя. Показательно, что для ActionCard вы уже используете `escapeHtml()` — тот же подход нужен и здесь (санитизировать через DOMPurify перед `innerHTML`, либо рендерить через безопасный markdown-рендерер с sanitize:true).
+
+**2. CORS `allow_origins=["*"]` + `allow_credentials=True`** (pm_iq_api.py)
+Это невалидная и небезопасная комбинация — браузеры её должны отклонять, но конфигурация сигнализирует "открыто для локальной разработки", и есть риск, что она доедет до продакшена как есть. Нужно явно сузить origins и убрать credentials, если они не нужны.
+
+**3. Нет авторизации на API вообще**
+`/api/ask`, `/stream/{session_id}`, `/api/result/{session_id}` открыты всем. Пока это демо на localhost — не проблема, но при развёртывании с реальными корпоративными данными (Jira/SAP) это должно быть закрыто аутентификацией/API-ключом до, а не после первого релиза.
+
+**4. `session_id` предсказуем и легко перебираем**
+```python
+session_id = f"session_{len(active_sessions) + 1}"
+```
+Последовательный счётчик → любой клиент может подставить чужой `session_id` и прочитать чужой результат через `/api/result/{session_id}`. Нужен `uuid4()`.
+
+**5. Глобальная подмена `sys.stdout`/`sys.stderr` в конкурентном коде**
+```python
+sys.stdout = log_writer
+...
+result = await agent.run(query, mode=mode)
+...
+sys.stdout = old_stdout
+```
+`process_question` запускается через `asyncio.create_task` — при параллельных запросах разных пользователей это общее состояние процесса будет гоняться между сессиями, и логи одного пользователя попадут в сессию другого (race condition). Нужен `contextvars` вместо глобальной замены `sys.stdout`, либо явный logger per-session без monkey-patching stdout.
+
+**6. `active_sessions` — неограниченный рост в памяти**
+Нет TTL/очистки завершённых сессий → утечка памяти при долгой работе сервиса.
+
+## 🟠 Важно — заложить до реальной интеграции
+
+**7. `unified_mock_server.py`: точное совпадение фильтров по умолчанию**
+Только `identify_project` умеет нечёткий поиск; остальные инструменты требуют точного совпадения строки (регистронезависимо, но без диакритики/опечаток/частичных совпадений). Когда данные придут из реальных систем (где значения статусов, имён и т.п. не всегда предсказуемы), это будет чаще давать пустые результаты, которые LLM интерпретирует как "нет данных" вместо "неправильный формат фильтра". Стоит заранее продумать общий механизм подсказок при пустом результате (echo доступных значений колонки).
+
+**8. Нет лимита на объём данных, возвращаемых инструментом**
+CSV сейчас маленькие, но реальные API (особенно SAP/Jira JQL-выдачи) могут вернуть сотни строк → раздутие контекста LLM. В API_TRAJECTORY.md вы правильно закладываете пагинацию на уровне протокола, но в `unified_mock_server.py`/агенте нет заглушки лимита строк — стоит добавить сейчас, чтобы паттерн (`max_rows`, обрезка + предупреждение) был отработан до миграции.
+
+**9. Молчаливый fallback роутера на `pm-project-core` при невалидном JSON**
+```python
+except json.JSONDecodeError:
+    print("Ошибка парсинга JSON от роутера...")
+    return ["pm-project-core"]
+```
+Это скрывает системные сбои промпта/модели как "нормальный" ответ. Лучше делать 1 retry с более строгим prompt перед fallback, и логировать это как ошибку, а не просто print.
+
+**10. Тестирование — только ручной `test_tool.py`**
+CONTRIBUTING.md упоминает `validate_marketplace.py`, но нет автоматических (pytest) тестов ни для `filter_data`, ни для `widget_renderer`, ни для agent_utils (`detect_loop`, `detect_hallucinations` и т.д. — судя по названиям, это критичная для качества логика, которую стоит покрыть юнит-тестами до того, как усложнится переход на реальные API).
+
+## 🟡 Процесс/документация
+
+**11. Ключевые MD-файлы — это шаблоны с чек-боксами, а не готовый контент**
+`CONTRIBUTING.md`, `AGENTS.md`, `ADMIN-INSTRUCTIONS.md`, `PLUGINS.md` состоят из `- [ ]` пунктов ("план содержимого"), а не заполненного текста. Это нормально для черновика, но если проект уже показывается людям (судя по продуманности README и UI) — стоит расставить приоритет и дописать хотя бы `ADMIN-INSTRUCTIONS.md` (там сейчас `*(перечислить все остальные из плагинов)*` вместо реального списка env-переменных) и `CONTRIBUTING.md`, так как без них новый контрибьютор не сможет самостоятельно добавить плагин.
+
+**12. `.gitignore` не покрывает `.env`**
+При появлении реальных секретов (`JIRA_API_TOKEN` и т.п., как задумано в API_TRAJECTORY.md) обязательно добавить `.env`, `*.env`, `secrets/` в `.gitignore` заранее — сейчас в файле этого нет.
+
+---
+
+Вот конкретные патчи для XSS-фикса (marked + DOMPurify) и session_id/CORS. Дам их в формате "было → стало" с точными путями, чтобы можно было применить руками или через git apply.
+
+## 1. XSS-фикс: DOMPurify + marked
+
+### 1.1. Добавить библиотеку в setup (samples/README.md)
+
+```diff
+ cd ~/PmIQ/samples
+ python3 -m venv venv
+ source venv/bin/activate
+ pip install -r requirements.txt
+ mkdir ui/js
+ cd ui/js
+ curl -O https://cdn.jsdelivr.net/npm/echarts@6.1.0/dist/echarts.min.js
+ curl -O https://cdn.jsdelivr.net/npm/marked/marked.min.js
++curl -O https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js
+```
+
+Версию DOMPurify лучше зафиксировать (`@3.1.6` или актуальную на момент установки), а не тянуть `@latest` — как и с echarts/marked, чтобы сборка была воспроизводимой.
+
+### 1.2. Подключить скрипт в `samples/ui/index.html` (рядом со строкой 4796-4797)
+
+```diff
+     <script src="/static/js/echarts.min.js"></script>
+     <script src="/static/js/marked.min.js"></script>
++    <script src="/static/js/purify.min.js"></script>
+```
+
+### 1.3. Санитизировать перед вставкой в DOM (строка ~5790, функция `displayResult`)
+
+```diff
+         function displayResult(data) {
+             const responseCard = document.getElementById('responseCard');
+             const responseContent = document.getElementById('responseContent');
+             const chartsContainer = document.getElementById('chartsContainer');
+ 
+-            responseContent.innerHTML = marked.parse(data.answer);
++            // marked может пропустить произвольный raw HTML из ответа LLM
++            // (который, в свою очередь, может содержать данные из внешних
++            // систем — Jira/SAP/ServiceNow). DOMPurify вырезает скрипты,
++            // обработчики on*, javascript: и т.д. перед вставкой в DOM.
++            const rawHtml = marked.parse(data.answer);
++            responseContent.innerHTML = DOMPurify.sanitize(rawHtml, {
++                // разрешаем то, что реально нужно для рендера markdown-ответа
++                ALLOWED_TAGS: [
++                    'p', 'br', 'strong', 'em', 'code', 'pre', 'blockquote',
++                    'ul', 'ol', 'li', 'a', 'h1', 'h2', 'h3', 'h4', 'table',
++                    'thead', 'tbody', 'tr', 'th', 'td', 'hr', 'span'
++                ],
++                ALLOWED_ATTR: ['href', 'class'],
++                // запрещаем javascript:, data: и т.п. в href
++                ALLOWED_URI_REGEXP: /^(?:https?|mailto):/i
++            });
+```
+
+Почему именно так:
+- **Явный allowlist тегов/атрибутов**, а не дефолтная конфигурация DOMPurify — потому что дефолт разрешает довольно много (включая `img`, `style` и т.д.), а для чат-ответа с markdown реально нужен только этот набор. Это защита "по умолчанию deny", а не "потом придумаем что запретить".
+- `ALLOWED_URI_REGEXP` отдельно блокирует `javascript:`/`data:` в `href` — DOMPurify и так это фильтрует, но явное указание делает намерение читаемым при код-ревью.
+- Атрибут `class` оставлен, потому что `marked` вешает классы на блоки кода (`language-json` и т.п.) — если нужна подсветка синтаксиса, она завязана на этих классах.
+
+Дополнительно (не обязательно, но правильно) — отключить у `marked` разбор сырого HTML на уровне парсера, чтобы DOMPurify был вторым эшелоном защиты, а не единственным:
+
+```diff
++        marked.setOptions({
++            breaks: true,
++            gfm: true
++        });
++        // DOMPurify.sanitize остаётся основной защитой (см. displayResult) —
++        // это не замена, а defense-in-depth
+```
+
+(В текущих версиях `marked` флаг `sanitize` deprecated и удалён — поэтому именно DOMPurify после парсинга, а не опция самого marked, это правильный современный способ.)
+
+## 2. Непредсказуемый `session_id` + TTL-очистка (samples/pm_iq_api.py)
+
+### 2.1. Импорт и генерация id
+
+```diff
+ import asyncio
+ import json
+ import io
+ import re
+ import sys
++import time
++import uuid
+ import uvicorn
+ from pathlib import Path
+ from typing import Dict, List, Any
+```
+
+```diff
+ @app.post("/api/ask")
+ async def ask_question(request: QuestionRequest):
+     """ Submit a question and get a session ID """
+-    session_id = f"session_{len(active_sessions) + 1}"
++    session_id = uuid.uuid4().hex
+     active_sessions[session_id] = {
+         "query": request.query,
+         "mode": request.mode,
+         "logs": [],
+         "result": None,
+-        "status": "processing"}
++        "status": "processing",
++        "created_at": time.monotonic()}
+     asyncio.create_task(process_question(session_id, request.query, request.mode))
+     return {"session_id": session_id, "mode": request.mode}
+```
+
+`uuid4()` даёт 122 бита энтропии — угадать/перебрать чужой `session_id` практически невозможно, в отличие от последовательного счётчика. Это не полноценная авторизация (кто угодно с валидным id всё ещё может прочитать результат — если это чувствительные данные, id должен быть привязан к пользователю/токену), но закрывает самый дешёвый вектор — простой перебор `session_1`, `session_2`, ...
+
+### 2.2. TTL-очистка старых сессий (устраняет утечку памяти)
+
+```diff
+ # Хранилище активных сессий
+ active_sessions: Dict[str, Dict] = {}
++SESSION_TTL_SECONDS = 30 * 60  # хранить результат 30 минут после завершения
+```
+
+```diff
++async def cleanup_expired_sessions():
++    """ Фоновая задача: удаляет завершённые сессии старше TTL """
++    while True:
++        await asyncio.sleep(60)
++        now = time.monotonic()
++        expired = [
++            sid for sid, s in active_sessions.items()
++            if s["status"] in ("completed", "error")
++            and now - s.get("created_at", now) > SESSION_TTL_SECONDS]
++        for sid in expired:
++            del active_sessions[sid]
++
+ @asynccontextmanager
+ async def lifespan(app: FastAPI):
+     print("Starting PM IQ API...", flush=True)
+     await agent.initialize()
+     print(f"Agent initialized. Tools loaded: {len(agent.all_tools)}", flush=True)
+     print(f"Plugins: {[p['name'] for p in agent.structure.plugins]}", flush=True)
++    cleanup_task = asyncio.create_task(cleanup_expired_sessions())
+     yield
++    cleanup_task.cancel()
+     print("Shutting down PM IQ API...", flush=True)
+```
+
+Сессии в статусе `processing` не трогаем (иначе оборвём активный SSE-стрим), удаляем только уже завершённые и просроченные.
+
+## 3. CORS (samples/pm_iq_api.py)
+
+Текущий код:
+```python
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"])
+```
+
+Патч — вынести origins в конфиг/переменную окружения и разделить логику для credentials:
+
+```diff
++import os
+```
+
+```diff
+-# CORS для локальной разработки
+-app.add_middleware(
+-    CORSMiddleware,
+-    allow_origins=["*"],
+-    allow_credentials=True,
+-    allow_methods=["*"],
+-    allow_headers=["*"])
++# CORS: список разрешённых origin задаётся через переменную окружения,
++# по умолчанию — только локальная разработка.
++# ВАЖНО: allow_credentials=True несовместим с allow_origins=["*"] —
++# либо явный список origin + credentials, либо "*" без credentials.
++_allowed_origins_env = os.getenv("PM_IQ_ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")
++ALLOWED_ORIGINS = [o.strip() for o in _allowed_origins_env.split(",") if o.strip()]
++
++app.add_middleware(
++    CORSMiddleware,
++    allow_origins=ALLOWED_ORIGINS,
++    allow_credentials=True,
++    allow_methods=["GET", "POST"],
++    allow_headers=["Content-Type"])
+```
+
+Что изменилось и почему:
+- `allow_origins` теперь явный список (из env, с безопасным дефолтом под локальную разработку), а не `"*"` — это то самое требование браузеров: wildcard + credentials не работает корректно и провоцирует либо тихие сбои CORS, либо (при некоторых конфигурациях прокси/старых браузерах) утечку данных с credentials на непроверенный origin.
+- `allow_methods`/`allow_headers` сужены до реально используемых (`GET`/`POST`, `Content-Type`) вместо `["*"]` — принцип наименьших привилегий, плюс так виднее в код-ревью, какие методы API реально поддерживает.
+- Если credentials (cookies/Authorization) фронтенду не нужны — можно вообще выставить `allow_credentials=False` и оставить `allow_origins=["*"]`, но раз в проекте уже есть SSE-стрим с session-based доступом, я бы закладывал явные origins сразу, до появления реальной аутентификации.
+
+---
+
+Как лучше изменить stateless режим, только теория — код не трогаю. Разобрал `run_stateless_loop`, `_build_stateless_react_prompt`, `_push_recent_call`/`is_consecutive_duplicate` и сравнил с тем, что есть в `history`/concentrator-режиме (`detect_loop`, `detect_hallucinations`). Нашёл несколько конкретных, привязанных к вашему коду точек роста — от самой дешёвой до самой архитектурной.
+
+## 1. Показательный сигнал: версионирование говорит само за себя
+
+В `/api/modes` stateless помечен как `v.0.01`, concentrator — `v.0.2`. Это не случайность: сравнение кода подтверждает, что stateless — более ранний и менее защищённый вариант. У concentrator есть `detect_loop` (окно из N сообщений, две эвристики) и `detect_hallucinations` (сверка Final Answer с наблюдениями). У stateless — ни того, ни другого в равноценном виде. Дальше — детали, но общий вывод: **самый быстрый ROI — подтянуть stateless до защитного уровня concentrator**, а не изобретать новое.
+
+## 2. Нет проверки на галлюцинации перед Final Answer — самая важная дыра
+
+В `run_stateless_loop` перед возвратом `final_text` есть `_check_widgets_data_presence` (проверка, что у виджетов есть данные), но **нет** аналога `detect_hallucinations` для текстовой части ответа. При этом сам промпт stateless-режима явно и жирным текстом предупреждает: *"НИКОГДА не выдумывайте... работаете с РЕАЛЬНЫМИ данными"* — то есть именно тот failure mode, который авторы явно боятся, не имеет автоматического бэкстопа в этом режиме, хотя для concentrator он есть.
+
+**Теоретическое решение:** прогонять `answer_text` через `detect_hallucinations(answer_text, [obs for _, _, obs in accumulated])` тем же путём, что и виджет-проверку — если найдены "придуманные" сущности, не отдавать ответ пользователю сразу, а делать то же, что уже делается для missing_widgets: добавить `_system_notice` с указанием, какие имена/значения не подтверждены источником, и заставить модель либо убрать их, либо вызвать инструмент, который их подтвердит. Механизм reject-and-retry уже есть в коде для виджетов — здесь нужно просто применить тот же паттерн к тексту.
+
+## 3. Анти-loop ловит только "сосед-дубликат", не более длинные циклы
+
+`is_consecutive_duplicate` сравнивает предложенный вызов только с `stack[0]` — то есть с самым последним. Цикл вида `get_risk_register → get_issue_log → get_risk_register → get_issue_log → ...` (чередование двух инструментов) никогда не будет пойман, потому что каждый отдельный вызов не совпадает с непосредственным предшественником. `detect_loop` в history-режиме устроен принципиально надёжнее: он смотрит на окно из N последних действий и считает совпадения сигнатур в этом окне, а не только "сосед ли".
+
+**Теоретическое решение:** завести в stateless-режиме параллельно со стеком-из-2 (он полезен именно для формулировки предупреждения модели — "вот твой последний вызов, не повторяй") ещё и **счётчик сигнатур по всему `accumulated`** (`make_call_signature` уже есть в agent_utils). Если сигнатура `(tool, args)` встретилась, скажем, 3 раза за весь диалог — независимо от соседства — принудительно требовать Final Answer, как уже сейчас делается при исчерпании плана из дубликатов. Это буквально перенос логики `detect_loop`, адаптированной под накопительный список вместо истории чата.
+
+## 4. Повторный роутинг на каждой итерации — дорого и потенциально нестабильно
+
+`route_query()` вызывает LLM заново на **каждой** итерации (передавая туда `accumulated_data`), и затем ещё один вызов LLM делает сам ReAct-шаг. Это 2 LLM-вызова за итерацию, то есть до 32 вызовов на один запрос при `_MAX_ITERATIONS_STATELESS = 16` — против условно одного роутинга в начале у concentrator (не проверял его код построчно, но по описанию режим — "маршрутизация один раз в начале, дальше история накапливается").
+
+Хуже того — есть риск **дрейфа набора плагинов**: если `accumulated_data` меняет то, что видит роутер, `selected_plugins` может измениться в середине выполнения плана, и тогда инструмент, который модель планировала вызвать на шаге 3, вдруг окажется вне `active_tools`. В коде это отчасти признано — `_expand_plugins_with_dependencies` намеренно применяется **только на iteration == 0** с явным `TODO: Только на первой итерации. Возможно это условие убрать`, то есть сами авторы это подозревали.
+
+**Теоретическое решение:** зафиксировать `selected_plugins` после первой итерации (или после того, как план впервые стал непустым), а не пересчитывать роутинг каждый раз. Повторный роутинг делать только по явному триггеру — например, если `_execute_tool_call` вернул "инструмент не найден" и fuzzy-match не помог, тогда можно допустить один дополнительный roundtrip роутинга с текущим `accumulated_data`, чтобы расширить набор плагинов. Это одновременно чинит и дрейф (пункт выше), и почти вдвое снижает число LLM-вызовов.
+
+## 5. Полные методички пересылаются заново каждую итерацию — теряется возможность prompt-кэширования
+
+`_build_stateless_react_prompt` каждый раз собирает **весь** текст SKILL.md выбранных плагинов + полный каталог виджетов заново — и это содержимое, в отличие от `accumulated_data`, не меняется между итерациями (если зафиксировать роутинг по п.4). Сейчас это просто пересылается по новой, занимая токены и время генерации без необходимости.
+
+**Теоретическое решение:** переставить структуру промпта так, чтобы **неизменная часть** (методички + каталог виджетов + системная инструкция) шла единым стабильным префиксом в начале, а изменяемая часть (`accumulated_data`, `recent_calls_warning`, вопрос) — строго в конце. Тогда локальный сервер (llama.cpp/vLLM с `--ctx-size`, judging by ваши флаги `--mirostat` и т.п. в README) сможет переиспользовать KV-cache префикса между итерациями одного запроса — это не архитектурное изменение логики, а именно "не мешать" уже существующей возможности prompt-caching на бэкенде инференса. Даёт заметный выигрыш в latency именно для локальных 7B-8B моделей, о которых вы пишете в комментариях к `route_query`.
+
+## 6. Жёсткий обрыв по лимиту итераций без деградации
+
+```python
+return "Превышено количество итераций в stateless-режиме."
+```
+При достижении `_MAX_ITERATIONS_STATELESS` весь накопленный `accumulated` (уже собранные реальные данные из Jira/SAP/CSV) просто выбрасывается, пользователь получает пустой отказ.
+
+**Теоретическое решение:** ввести "мягкий" порог (например, на итерации 13 из 16) — не обрывать сразу, а инжектировать в промпт системную инструкцию вида *"Бюджет итераций почти исчерпан. Сформируйте Final Answer на основе уже собранных данных, даже если не всё покрыто"*. Это переиспользует уже существующий механизм `_system_notice`, только с новым триггером не по дубликатам, а по остатку бюджета.
+
+## 7. `accumulated_data` не имеет верхней границы
+
+Поскольку в stateless-режиме принципиально нет сжатия/концентрации истории (это работа concentrator-режима), а данные копятся в виде markdown-таблиц, это единственный режим, который может упереться в контекстное окно локальной модели при длинных многошаговых запросах — особенно после перехода на реальные API (см. ваш `API_TRAJECTORY.md`), где ответы Jira/SAP будут объёмнее CSV-моков.
+
+**Теоретическое решение:** мягкий лимит на суммарный размер `accumulated_data` (в символах/токенах) с авто-сжатием старых блоков — например, оставлять заголовок ("получены вызовом `X` с аргументами `Y`") нетронутым (он критичен для анти-loop предупреждений), но заменять старое тело markdown-таблицы на компактную сводку (кол-во строк, min/max/avg по числовым полям), если блоку "больше N итераций".
+
+---
+
+**Итоговый приоритет** (что даёт больше всего пользы за меньше всего усилий):
+1. Добавить `detect_hallucinations`-проверку в Final Answer stateless (безопасность/качество ответа — самое важное).
+2. Заменить "сосед-дубликат" на счётчик сигнатур по всему `accumulated` (надёжность анти-loop).
+3. Зафиксировать `selected_plugins` после первой итерации вместо перероутинга каждый раз (стоимость + стабильность).
+4. Переставить порядок промпта для prompt-caching (перформанс, бесплатно по сути).
+5. Мягкая деградация по лимиту итераций и по размеру `accumulated_data` (устойчивость на длинных запросах — особенно актуально перед миграцией на реальные API).

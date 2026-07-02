@@ -1036,6 +1036,12 @@ class PmIqAgent:
             import traceback
             traceback.print_exc()
             return "Ошибка при сборке системного промпта."
+        # TODO: Сжатие старых observation (sliding window), чтобы при большом числе итераций контекст не пух
+        # TODO: Мб промпт подавать как системный, по типу
+        # history = [	                                                                            
+        #     {"role": "system", "content": system_prompt},
+        #     {"role": "user",   "content": f"Вопрос: {query}"},                                                                                                                                                                  
+        # ]
         for iteration in range(_MAX_ITERATIONS_HISTORY):
             print(f"\n[Итерация {iteration + 1}]")
             if detect_loop(history):
@@ -1251,6 +1257,7 @@ class PmIqAgent:
                                 f"- Config (ДОСЛОВНО):\n"
                                 f"{json.dumps(intent.get('config', {}), ensure_ascii=False, indent=2)}")
         methodologies = "\n\n".join(methodologies_parts)
+        # TODO: Если в двух скиллах виджет одного типа с таким же интентом, но с разными смыслами (описаниями)?
         widgets_catalog = "\n\n".join(widgets_catalog_parts) if widgets_catalog_parts else "(Виджетов нет)"
 
         # Список доступных инструментов

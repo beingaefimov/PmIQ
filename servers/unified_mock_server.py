@@ -62,6 +62,9 @@ def filter_data(
     for row in data:
         match = True
         for key, value in arguments.items():
+            # Игнорируем null значения - читаем как фильтр выключен
+            if value is None:
+                continue
             csv_key = next((k for k in row.keys() if k.lower() == key.lower()), None)
             if csv_key:
                 if str(row[csv_key]).strip().lower() != str(value).strip().lower():

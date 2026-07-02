@@ -34,7 +34,7 @@ available_widgets:
             "button": {
               "text": "Активировать план для Risk-01",
               "action": "activate_mitigation_plan",
-              "payload": { "risk_id": "Risk-01", "owner": "Ivanov I.I.", "pproject_id": "Datacenter" }
+              "payload": { "risk_id": "Risk-01", "owner": "Ivanov I.I.", "project_id": "Datacenter" }
             },
             "config": {},
             "data_rows": []
