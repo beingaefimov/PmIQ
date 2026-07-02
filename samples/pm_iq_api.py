@@ -77,9 +77,10 @@ PREDEFINED_QUESTIONS = [
     PredefinedQuestion(id="6", category="Quality", text="Какие есть открытые несоответствия (NCR) по всем проектам и каков их статус?"),
     PredefinedQuestion(id="7", category="Cross-domain", text="Ключевые выводы по EVM в проекте 'Миграция ERP'."),
     PredefinedQuestion(id="8", category="Cross-domain", text="Прогноз итоговой стоимости (EAC) в трёх сценариях в проекте 'Миграция ERP'."),
-    PredefinedQuestion(id="8", category="Team", text="В какой команде по всем проектам сейчас самые низкие показатели морального климата?"),
-    PredefinedQuestion(id="8", category="Team", text="Налажено ли взаимодействие между командами по всем проектам на текущий момент?"),
-    PredefinedQuestion(id="9", category="Resources", text="У меня появилась новая задача на 20 часов. Кто из команд всех проектов может взять её без перегрузки?")]
+    PredefinedQuestion(id="9", category="Team", text="В какой команде по всем проектам сейчас самые низкие показатели морального климата?"),
+    PredefinedQuestion(id="10", category="Team", text="Налажено ли взаимодействие между командами по всем проектам на текущий момент?"),
+    PredefinedQuestion(id="11", category="Team", text="ROI встреч по проектам?"),
+    PredefinedQuestion(id="12", category="Resources", text="У меня появилась новая задача на 20 часов. Кто из команд всех проектов может взять её без перегрузки?")]
 
 @app.get("/", response_class=HTMLResponse)
 async def get_ui():
@@ -112,7 +113,7 @@ async def get_modes() -> Dict[str, Any]:
                 "id": "stateless",
                 "label": "Stateless ReAct (v.0.01)",
                 "description": (
-                    "цикл «с чистого листа» на каждом шаге (полный набор методологий + растущий блок получаемых из ИС данных + исходный вопрос), история цикла ReAct не накапливается"
+                    "цикл «с чистого листа» на каждом шаге (полный набор методичек + растущий блок получаемых из ИС данных + исходный вопрос), история цикла ReAct не накапливается"
                 ),
             },
         ],

@@ -1,4 +1,15 @@
-project_name,required_skill,required_level,available_count,needed_count,gap_description,source_system
-ERP_Migration,SAP Migration,Expert,1,2,Shortage of 1 expert,Workday
-ERP_Migration,Cybersecurity,Expert,0,1,Missing cybersecurity expert,Workday
-Mobile_App_Dev,React Native,Advanced,3,2,No gap,Workday
+project_id,required_skill,required_level,available_count,needed_count,gap_description,criticality,source_system,is_single_point_of_failure,failure_impact
+ERP_Migration,SAP Migration,Expert,1,2,Shortage of 1 expert,High,Workday,true,Project will stall without SAP expert
+ERP_Migration,Cybersecurity,Expert,0,1,Missing cybersecurity expert,Critical,Workday,false,
+ERP_Migration,Data Modeling,Advanced,2,2,No gap,Low,Workday,false,
+ERP_Migration,Performance Tuning,Expert,1,1,No gap but single expert,Medium,Workday,true,Performance issues will be unaddressed
+Mobile_App_Dev,React Native,Advanced,3,2,No gap,Low,Workday,false,
+Mobile_App_Dev,DevOps,Advanced,1,2,Shortage of 1 DevOps engineer,Medium,Workday,true,CI/CD pipeline will halt
+Mobile_App_Dev,iOS Development,Expert,1,1,No gap but single expert,Medium,Workday,true,iOS release will be blocked
+Construction_Phase1,Structural Engineering,Expert,2,3,Shortage of 1 structural engineer,High,Workday,false,
+Construction_Phase1,Safety Management,Certified,1,2,Missing certified safety officer,Critical,Workday,true,Work must stop without certified safety officer
+Construction_Phase1,Finite Element Analysis,Expert,1,1,No gap but single expert,High,Workday,true,Structural calculations will be delayed
+Data_Center,Network Architecture,Expert,0,2,Missing network architects,Critical,Workday,false,
+Data_Center,Security Clearance,Expert,1,1,No gap but single expert,High,Workday,true,Compliance audit will fail
+RPA_Automation,RPA Development,Advanced,3,3,No gap,Low,Workday,false,
+RPA_Automation,Process Analysis,Advanced,1,2,Shortage of 1 process analyst,Medium,Workday,true,Process improvements will stall

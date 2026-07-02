@@ -1,4 +1,13 @@
-project_name,milestone_name,target_date,status,source_system,variance_days
-ERP_Migration,ТЗ утверждено,2024-02-01,Achieved,Primavera P6,3
-ERP_Migration,Миграция данных,2024-09-30,At Risk,Primavera P6,-12
-Construction_Phase1,Сдача фундамента,2024-07-01,On Track,MS Project,0
+project_id,milestone_name,target_date,actual_date,status,source_system,variance_days,is_critical,blocking_next_phase
+ERP_Migration,ТЗ утверждено,2024-02-01,2024-02-04,Achieved,Primavera P6,3,false,false
+ERP_Migration,Миграция данных,2024-09-30,,At Risk,Primavera P6,-12,true,true
+ERP_Migration,Go-Live,2024-12-31,,At Risk,Primavera P6,-5,true,false
+Construction_Phase1,Проектирование завершено,2024-03-01,2024-03-04,Achieved,MS Project,3,false,false
+Construction_Phase1,Сдача фундамента,2024-07-01,,Delayed,MS Project,-14,true,true
+Construction_Phase1,Каркас завершен,2024-12-01,,At Risk,MS Project,-10,true,false
+Mobile_App_Dev,Дизайн утвержден,2024-04-01,2024-04-03,Achieved,Jira,2,false,false
+Mobile_App_Dev,Beta релиз,2024-08-15,,On Track,Jira,0,true,false
+Mobile_App_Dev,Production релиз,2024-09-30,,On Track,Jira,0,true,false
+Data_Center,Проект утвержден,2024-08-01,,On Track,MS Project,0,false,false
+Bridge_Project,Экспертиза пройдена,2024-12-01,,On Track,Primavera P6,0,false,false
+RPA_Automation,Pilot запуск,2024-10-01,,At Risk,Jira,-3,true,false

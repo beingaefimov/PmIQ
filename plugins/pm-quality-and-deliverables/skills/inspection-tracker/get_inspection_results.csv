@@ -1,3 +1,3 @@
-project_name,inspection_id,type,result,inspector,comments,source_system
+project_id,inspection_id,type,result,inspector,comments,source_system
 Construction_Phase1,I-001,Foundation,Passed,Tech Supervision,Matches project specs,QMS
 Construction_Phase1,I-002,Rebar,Failed,Tech Supervision,Wrong diameter, requires replacement,QMS

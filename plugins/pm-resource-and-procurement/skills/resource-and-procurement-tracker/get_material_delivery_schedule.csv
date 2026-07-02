@@ -1,4 +1,9 @@
-project_name,material_name,po_id,expected_delivery,actual_delivery,status,source_system
-ERP_Migration,Dell Servers,PO-2024-001,2024-06-15,,In Transit,SAP MM
-Construction_Phase1,Concrete M500,PO-2024-002,2024-06-01,2024-06-10,Delayed,SAP MM
-Mobile_App_Dev,AWS Licenses,PO-2024-005,2024-07-01,,On Track,SAP MM
+project_id,material_name,po_id,expected_delivery,actual_delivery,variance_days,status,source_system
+ERP_Migration,Dell Servers,PO-2024-001,2024-06-15,,0,In Transit,SAP MM
+Construction_Phase1,Concrete M500,PO-2024-002,2024-06-01,2024-06-10,-9,Delayed,SAP MM
+Mobile_App_Dev,AWS Licenses,PO-2024-005,2024-07-01,,0,On Track,SAP MM
+Construction_Phase1,Steel Rebar,PO-2024-003,2024-06-05,2024-06-12,-7,Delayed,SAP MM
+ERP_Migration,Network Equipment,PO-2024-004,2024-06-20,,0,In Transit,SAP MM
+Data_Center,Cooling Systems,PO-2024-006,2024-08-01,,0,On Track,SAP MM
+Construction_Phase1,Safety Equipment,PO-2024-007,2024-05-30,2024-05-30,0,Delivered,SAP MM
+RPA_Automation,Software Licenses,PO-2024-008,2024-07-15,,0,On Track,SAP MM

@@ -1,4 +1,10 @@
-project_name,issue_id,description,severity,status,days_open,assigned_to,source_system
-ERP_Migration,I-001,Data migration error,Critical,Open,5,Dev Team,ServiceNow
-ERP_Migration,I-002,API incompatibility,High,In Progress,3,Integrator,ServiceNow
-Mobile_App_Dev,I-003,UI glitch on iOS,Low,Open,2,QA Team,Jira
+project_id,issue_id,description,severity,status,days_open,assigned_to,source_system,sla_days,escalation_level,overdue_days,related_risk_id
+ERP_Migration,I-001,Data migration error,Critical,Open,5,Dev Team,ServiceNow,3,PMO,2,R-001
+ERP_Migration,I-002,API incompatibility,High,In Progress,3,Integrator,ServiceNow,5,Team Lead,-2,R-002
+Mobile_App_Dev,I-003,UI glitch on iOS,Low,Open,2,QA Team,Jira,7,None,-5,
+Construction_Phase1,I-004,Concrete delivery delay,Critical,Open,7,Site Manager,ServiceNow,2,Project Director,5,R-003
+Construction_Phase1,I-005,Rebar diameter mismatch,High,Resolved,4,Quality Inspector,QMS,5,Team Lead,-1,
+ERP_Migration,I-006,Performance degradation,High,Open,6,Performance Team,ServiceNow,5,PMO,1,
+Mobile_App_Dev,I-007,Payment gateway timeout,Medium,In Progress,4,Backend Team,Jira,7,None,-3,
+Construction_Phase1,I-008,Weather damage to materials,Medium,Closed,3,Procurement,QMS,5,None,-2,
+RPA_Automation,I-009,Bot execution failure,High,Open,2,Dev Team,Jira,5,Team Lead,-3,

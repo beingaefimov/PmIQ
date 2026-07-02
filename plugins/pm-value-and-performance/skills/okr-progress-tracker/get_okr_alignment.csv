@@ -1,4 +1,10 @@
-project_name,objective,key_result,progress_pct,contribution_level,source_system
-ERP_Migration,Digital Transformation,Migrate 100% critical systems,65,High,Power BI
-Construction_Phase1,Safety First,Zero lost-time injuries,100,High,Power BI
-Mobile_App_Dev,Customer Satisfaction,Increase app rating to 4.8,80,Medium,Power BI
+project_id,objective,key_result,progress_pct,contribution_level,weight,source_system,quarter
+ERP_Migration,Digital Transformation,Migrate 100% critical systems,65,High,30,Power BI,Q2 2024
+ERP_Migration,Operational Excellence,Reduce process time by 40%,45,Medium,20,Power BI,Q2 2024
+Construction_Phase1,Safety First,Zero lost-time injuries,100,High,40,Power BI,Q2 2024
+Construction_Phase1,Capacity Expansion,Increase production capacity by 25%,35,High,35,Power BI,Q2 2024
+Mobile_App_Dev,Customer Satisfaction,Increase app rating to 4.8,80,Medium,25,Power BI,Q2 2024
+Mobile_App_Dev,Revenue Growth,Achieve 100K active users,60,High,30,Power BI,Q2 2024
+Data_Center,Infrastructure Modernization,Reduce downtime by 50%,10,High,40,Power BI,Q2 2024
+RPA_Automation,Cost Reduction,Reduce operational costs by 30%,55,High,35,Power BI,Q2 2024
+Bridge_Project,Regional Development,Improve logistics efficiency,5,Medium,20,Power BI,Q2 2024

@@ -1,7 +1,13 @@
-team,resource_name,role,allocation_pct,status,source_system,availability_pct
-Development,Alexeev A.,Senior Dev,120,Overallocated,Workday,-20
-Development,Borisov B.,Dev,80,Normal,Workday,20
-Construction,Brigade_1,Masons,110,Overallocated,Workday,-10
-Development,Alexeeva A.,Senior Dev,120,Overallocated,Workday,-20
-Development,Borisova B.,Dev,80,Normal,Workday,20
-Construction,Brigade_2,Masons,110,Overallocated,Workday,-10
+team,resource_name,role,project_id,allocation_pct,status,source_system,availability_pct,on_critical_path,critical_path_tasks,overload_duration_weeks,unique_critical_skill
+Development,Alexeev A.,Senior Dev,ERP_Migration,120,Overallocated,Workday,-20,true,Data Migration;API Integration,3,false
+Development,Borisov B.,Dev,ERP_Migration,80,Normal,Workday,20,false,,0,false
+Development,Alexeeva A.,Senior Dev,Mobile_App_Dev,130,Overallocated,Workday,-30,true,Payment Gateway,4,true
+Development,Borisova B.,Dev,Mobile_App_Dev,85,Normal,Workday,15,false,,0,false
+Construction,Brigade_1,Masons,Construction_Phase1,110,Overallocated,Workday,-10,true,Foundation;Rebar Installation,2,false
+Construction,Brigade_2,Masons,Construction_Phase1,95,Normal,Workday,5,false,,0,false
+Construction,Ivanov I.I.,Structural Engineer,Construction_Phase1,140,Overallocated,Workday,-40,true,Structural Design,5,true
+Construction,Petrov P.P.,Safety Officer,Construction_Phase1,75,Normal,Workday,25,false,,0,false
+DevOps,Sidorov S.S.,DevOps Engineer,Mobile_App_Dev,115,Overallocated,Workday,-15,true,CI/CD Pipeline,2,true
+DevOps,Kuznetsov K.K.,DevOps Engineer,ERP_Migration,70,Normal,Workday,30,false,,0,false
+QA,Volkov V.V.,QA Lead,ERP_Migration,105,Overallocated,Workday,-5,false,,1,false
+QA,Zaitseva Z.Z.,QA Engineer,Mobile_App_Dev,60,Normal,Workday,40,false,,0,false

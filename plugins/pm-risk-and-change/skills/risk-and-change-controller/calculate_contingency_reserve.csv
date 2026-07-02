@@ -1,4 +1,6 @@
-project_name,total_budget,contingency_reserve_amount,management_reserve_amount,reserve_utilization_pct,source_system
-ERP_Migration,10000000,1500000,500000,35.0,SAP FI/CO
-Construction_Phase1,50000000,5000000,2500000,12.0,SAP FI/CO
-Mobile_App_Dev,2000000,200000,100000,5.0,SAP FI/CO
+project_id,total_budget,contingency_reserve_amount,management_reserve_amount,reserve_utilization_pct,remaining_contingency,total_emv,source_system
+ERP_Migration,10000000,1500000,500000,35.0,975000,1200000,SAP FI/CO
+Construction_Phase1,50000000,5000000,2500000,12.0,4400000,1800000,SAP FI/CO
+Mobile_App_Dev,2000000,200000,100000,5.0,190000,350000,SAP FI/CO
+Data_Center,15000000,2000000,1000000,8.0,1840000,5000000,SAP FI/CO
+RPA_Automation,500000,50000,25000,10.0,45000,50000,SAP FI/CO

@@ -1,5 +1,7 @@
-project_id,project_name,aliases,description,status
-ERP_Migration,Миграция ERP,ERP;ЭРП;миграция;внедрение ERP,Migracja systemu ERP do новой платформы,Active
-Construction_Phase1,Строительство Фаза 1,стройка;фаза 1;building,Строительство производственного корпуса,Active
-Mobile_App_Dev,Мобильное приложение,мобилка;app;mobile,Разработка мобильного приложения для клиентов,Active
-Data_Center,Центр обработки данных,ЦОД;data center;серверная,Модернизация ЦОД,Planning
+project_id,project_name,aliases,description,status,industry,methodology
+ERP_Migration,Миграция ERP,ERP;ЭРП;миграция;внедрение ERP;ERP system,Миграция системы ERP на новую платформу,Active,IT,hybrid
+Construction_Phase1,Строительство Фаза 1,стройка;фаза 1;building;производственный корпус,Строительство производственного корпуса,Active,construction,predictive
+Mobile_App_Dev,Мобильное приложение,мобилка;app;mobile;mobile app,Разработка мобильного приложения для клиентов,Active,IT,adaptive
+Data_Center,Центр обработки данных,ЦОД;data center;серверная;дата-центр,Модернизация ЦОД,Planning,IT,predictive
+Bridge_Project,Мост через реку,bridge;мост;мостовой переход,Проектирование и строительство моста,Planning,construction,predictive
+RPA_Automation,Автоматизация процессов,RPA;роботизация;автоматизация;business process,Автоматизация бизнес-процессов с помощью RPA,Active,IT,adaptive

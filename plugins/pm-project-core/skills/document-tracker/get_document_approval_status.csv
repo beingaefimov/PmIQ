@@ -1,4 +1,11 @@
-document_name,project_name,status,approval_date,reviewer_system,comments
-Tech_Spec_ERP,ERP_Migration,Approved,2024-02-01,SharePoint,All remarks resolved
-Design_Doc_Phase1,Construction_Phase1,Under Review,,SharePoint,15 comments, 5 critical
-API_Contract,Mobile_App_Dev,Approved,2024-04-10,SharePoint,Ready for dev
+document_name,project_id,status,approval_date,reviewer_system,comments,critical_remarks_count,blocking
+Tech_Spec_ERP,ERP_Migration,Approved,2024-02-01,SharePoint,All remarks resolved,0,false
+Design_Doc_Phase1,Construction_Phase1,Under Review,,SharePoint,15 comments: 5 critical,5,true
+API_Contract,Mobile_App_Dev,Approved,2024-04-10,SharePoint,Ready for dev,0,false
+Foundation_Drawing,Construction_Phase1,Approved,2024-05-15,SharePoint,Approved with minor changes,0,false
+Rebar_Spec,Construction_Phase1,Rejected,,SharePoint,Wrong steel grade specified,2,true
+UX_Design,Mobile_App_Dev,Pending Acceptance,,SharePoint,Awaiting customer review,0,false
+Security_Policy,ERP_Migration,Under Review,,SharePoint,Security team reviewing,1,true
+BIM_Model,Construction_Phase1,Approved,2024-06-01,SharePoint,Navisworks clash detection passed,0,false
+Test_Plan,Mobile_App_Dev,Approved,2024-05-20,SharePoint,QA approved,0,false
+Environmental_Impact,Construction_Phase1,Approved,2024-03-10,SharePoint,Regulatory approval received,0,false

@@ -1,7 +1,15 @@
-project_name,risk_id,description,probability,impact,probability_numeric,impact_numeric,risk_score,estimated_cost_impact,status,owner,source_system,period
-ERP_Migration,R-001,Server delivery delay,High,High,3,3,9,500000,Active,Ivanov I.I.,Risk DB,previous
-ERP_Migration,R-001,Server delivery delay,Medium,High,2,3,6,500000,Mitigated,Ivanov I.I.,Risk DB,current
-ERP_Migration,R-002,Staff shortage,Medium,Medium,2,2,4,300000,Active,Petrov P.P.,Risk DB,previous
-ERP_Migration,R-002,Staff shortage,High,High,3,3,9,300000,Active,Petrov P.P.,Risk DB,current
-Construction_Phase1,R-003,Weather conditions,High,Medium,3,2,6,150000,Active,Sidorov S.S.,Risk DB,previous
-Construction_Phase1,R-003,Weather conditions,Low,Low,1,1,1,150000,Closed,Sidorov S.S.,Risk DB,current
+project_id,risk_id,description,probability,impact,probability_numeric,impact_numeric,risk_score,estimated_cost_impact,status,owner,source_system,period,mitigation_status,trigger,response_strategy
+ERP_Migration,R-001,Server delivery delay,High,High,3,3,9,500000,Active,Ivanov I.I.,Risk DB,previous,Planned,Supplier notification delay,Mitigate
+ERP_Migration,R-001,Server delivery delay,Medium,High,2,3,6,500000,Mitigated,Ivanov I.I.,Risk DB,current,In Progress,Supplier notification delay,Mitigate
+ERP_Migration,R-002,Staff shortage,Medium,Medium,2,2,4,300000,Active,Petrov P.P.,Risk DB,previous,Planned,Resignation interview,Mitigate
+ERP_Migration,R-002,Staff shortage,High,High,3,3,9,300000,Active,Petrov P.P.,Risk DB,current,In Progress,Resignation interview,Mitigate
+ERP_Migration,R-010,Cybersecurity breach,Low,Critical,1,3,3,2000000,Active,Sidorov S.S.,Risk DB,current,Planned,Unusual network activity,Transfer
+ERP_Migration,R-011,Data integrity loss,Medium,High,2,3,6,800000,Active,Kuznetsov K.K.,Risk DB,current,Not Started,Validation errors > 5%,Mitigate
+Construction_Phase1,R-003,Weather conditions,High,Medium,3,2,6,150000,Active,Sidorov S.S.,Risk DB,previous,Planned,Weather forecast warning,Accept
+Construction_Phase1,R-003,Weather conditions,Low,Low,1,1,1,150000,Closed,Sidorov S.S.,Risk DB,current,Completed,Weather forecast warning,Accept
+Construction_Phase1,R-012,Permit delay,Medium,High,2,3,6,400000,Active,Volkov V.V.,Risk DB,current,Planned,Regulatory body response delay,Mitigate
+Construction_Phase1,R-013,Material quality defect,High,High,3,3,9,600000,Active,Zaitseva Z.Z.,Risk DB,current,Not Started,Inspection failure rate > 10%,Avoid
+Mobile_App_Dev,R-014,API deprecation,Medium,Medium,2,2,4,100000,Active,Alexeev A.,Risk DB,current,Planned,Third-party notification,Mitigate
+Mobile_App_Dev,R-015,User adoption low,Low,High,1,3,3,250000,Active,Borisov B.,Risk DB,current,Not Started,Beta feedback score < 3.5,Mitigate
+Data_Center,R-016,Power outage,Critical,Critical,3,3,9,5000000,Active,Petrov P.P.,Risk DB,current,Planned,Grid instability alerts,Transfer
+RPA_Automation,R-017,Process change,Medium,Low,2,1,2,50000,Active,Kuznetsov K.K.,Risk DB,current,Planned,Business process revision,Avoid

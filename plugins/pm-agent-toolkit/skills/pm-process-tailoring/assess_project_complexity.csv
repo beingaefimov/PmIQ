@@ -1,3 +1,7 @@
-project_name,size,uncertainty_level,team_experience,recommended_methodology,source_system
-Mobile_App_Dev,Small,High,High,Agile/Scrum,Internal Wiki
-Construction_Phase1,Large,Low,Medium,Predictive/Waterfall,Internal Wiki
+project_id,size,team_size,uncertainty_level,team_experience,regulatory_requirements,criticality,recommended_methodology,source_system
+Mobile_App_Dev,Small,8,High,High,Low,Medium,Agile/Scrum,Internal Wiki
+Construction_Phase1,Large,45,Low,Medium,High,High,Predictive/Waterfall,Internal Wiki
+ERP_Migration,Medium,25,Medium,High,Medium,High,Hybrid,Internal Wiki
+Data_Center,Large,30,Low,Medium,High,High,Predictive/Waterfall,Internal Wiki
+Bridge_Project,Large,50,Low,Medium,High,Critical,Predictive/Waterfall,Internal Wiki
+RPA_Automation,Small,6,High,High,Low,Medium,Agile/Kanban,Internal Wiki

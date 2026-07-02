@@ -1,3 +1,9 @@
-cr_id,project_name,description,status,submitted_date,ccb_decision,source_system
-CR-2024-015,ERP_Migration,Add new CRM integration,Pending CCB Review,2024-06-01,Pending,ServiceNow
-CR-2024-012,ERP_Migration,Change DB architecture,Approved,2024-05-15,Approved with conditions,ServiceNow
+cr_id,project_id,description,status,submitted_date,ccb_decision,impact_on_budget,impact_on_schedule,source_system,submitted_by
+CR-2024-015,ERP_Migration,Add new CRM integration,Pending CCB Review,2024-06-01,Pending,+500000,+30,ServiceNow,Project Manager
+CR-2024-012,ERP_Migration,Change DB architecture,Approved,2024-05-15,Approved with conditions,+200000,+14,ServiceNow,Tech Lead
+CR-2024-018,Construction_Phase1,Change concrete grade,Approved,2024-06-10,Approved,+150000,+7,ServiceNow,Site Engineer
+CR-2024-020,Mobile_App_Dev,Add push notifications,Rejected,2024-06-05,Rejected,0,0,Jira,Product Owner
+CR-2024-022,Construction_Phase1,Additional safety measures,Pending CCB Review,2024-06-15,Pending,+300000,+0,ServiceNow,Safety Officer
+CR-2024-025,ERP_Migration,Performance optimization,Under Review,2024-06-18,Under Review,+100000,+10,ServiceNow,Performance Team
+CR-2024-027,Mobile_App_Dev,UI redesign,Deferred,2024-06-12,Deferred,0,0,Jira,UX Designer
+CR-2024-030,RPA_Automation,Add new bot workflow,Approved,2024-06-08,Approved,+50000,+5,Jira,Business Analyst

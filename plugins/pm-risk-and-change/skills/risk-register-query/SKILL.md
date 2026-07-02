@@ -9,8 +9,6 @@ description: >
   идентификации новых рисков по аналогии. Работает исключительно с
   будущими неопределёнными событиями — в отличие от issue-escalation
   (уже случившиеся проблемы) и change-request-tracker (изменения плана).
-  В кросс-доменных запросах: риски задержки → pm-schedule-tracker;
-  риски перерасхода → pm-value-and-performance (EAC под давлением рисков).
 
 available_widgets:
   - type: action_card
@@ -26,7 +24,7 @@ available_widgets:
           - message: 1-2 предложения — суть угрозы, вероятность, стоимостной импакт
           - button.text: конкретное действие, например "Активировать план для Risk-01"
           - button.action: snake_case идентификатор, например "activate_mitigation_plan"
-          - button.payload: { "risk_id": "...", "owner": "...", "project_name": "..." }
+          - button.payload: { "risk_id": "...", "owner": "...", "project_id": "..." }
           
           Пример правильно заполненной JSON-карточки:
           {
@@ -36,7 +34,7 @@ available_widgets:
             "button": {
               "text": "Активировать план для Risk-01",
               "action": "activate_mitigation_plan",
-              "payload": { "risk_id": "Risk-01", "owner": "Ivanov I.I.", "project_name": "Datacenter" }
+              "payload": { "risk_id": "Risk-01", "owner": "Ivanov I.I.", "pproject_id": "Datacenter" }
             },
             "config": {},
             "data_rows": []
@@ -148,6 +146,8 @@ available_widgets:
 
 ### Шаг 1 — Загрузи реестр рисков
 Вызови `get_risk_register`. Фильтруй только `status = Active`.
+Для фильтрации по уровню воздействия и вероятности используй строковые поля `impact` и `probability` (значения: `High`, `Medium`, `Low`).
+**Не используй** для фильтрации числовые поля `impact_numeric` и `probability_numeric` — они нужны только для расчётов и визуализации.
 
 ### Шаг 2 — Рассчитай Risk Score
 `risk_score = probability_numeric × impact_numeric`, где Low=1, Medium=2, High=3.
@@ -161,8 +161,9 @@ available_widgets:
 
 ### Шаг 4 — Сценарное моделирование
 Если запрос "что будет, если...":
-- Вызови `simulate_risk_impact` для конкретного `risk_id`.
-- Три сценария: базовый / оптимистичный (P снижена на 50%) / пессимистичный (риск реализовался).
+- Вызови `simulate_risk_impact` для конкретного `risk_id` (и опционально `project_id`).
+- **Не передавай** параметр `scenarios` — инструмент вернёт все доступные сценарии автоматически.
+- Интерпретируй три сценария: базовый / оптимистичный (P снижена на 50%) / пессимистичный (риск реализовался).
 
 ### Шаг 5 — Проверь резервы
 Рассчитай суммарный EMV и сравни с `calculate_contingency_reserve`.
@@ -173,7 +174,7 @@ available_widgets:
 - "Во сколько обойдутся риски?" → `risk_matrix_cost_impact`
 - "Улучшилась ли ситуация с рисками?" → `risk_trend_shift` (нужны данные за два периода)
 
-## Используемые MCP инструменты
+## Required Tools
 - `get_risk_register`
 - `simulate_risk_impact`
 - `calculate_contingency_reserve`

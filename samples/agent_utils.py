@@ -1,4 +1,5 @@
 from __future__ import annotations
+import codecs
 import json
 import re
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -106,7 +107,16 @@ def robust_json_parse(text: str) -> Optional[Dict[str, Any]]:
         if m:
             raw = m.group(1)
             try:
-                extracted[key] = raw.encode("utf-8").decode("unicode_escape")
+                # Сначала декодируем unicode escape sequences
+                decoded = codecs.decode(raw, 'unicode_escape')
+                # Затем проверяем, не нужно ли декодировать UTF-8
+                try:
+                    # Если строка содержит UTF-8 байты, интерпретированные как Latin-1
+                    fixed = decoded.encode('latin-1').decode('utf-8')
+                    extracted[key] = fixed
+                except (UnicodeDecodeError, UnicodeEncodeError):
+                    # Текст уже в правильной кодировке
+                    extracted[key] = decoded
             except (UnicodeDecodeError, UnicodeEncodeError):
                 extracted[key] = raw
     m = re.search(r'"planned_tools"\s*:\s*\[([^\]]*)\]', block, re.DOTALL)
@@ -286,8 +296,8 @@ def detect_hallucinations(final_answer: str, observations: List[str]) -> List[st
 
 # Stateless-режим: парсер плана.
 # Шаблоны шагов плана:
-#   "Step 1: Call get_risk_register with args {"project_name": "ERP"} - причина"
-#   "1. get_risk_register({"project_name": "ERP"}) - причина"
+#   "Step 1: Call get_risk_register with args {"project_id": "ERP"} - причина"
+#   "1. get_risk_register({"project_id": "ERP"}) - причина"
 #   "Step 3: Final Answer"
 _STEP_TOOL_RE = re.compile(
     r'^\s*(?:step\s*)?(\d+)[\.\):]\s*' # номер шага

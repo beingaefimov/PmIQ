@@ -1,6 +1,17 @@
-project_name,wbs_id,wbs_name,status,parent_id,source_system,variance_days,completion_pct
-ERP_Migration,1.0,Инициация,Completed,0,Primavera P6,2,100
-ERP_Migration,2.0,Планирование,Completed,0,Primavera P6,1,100
-ERP_Migration,3.0,Выполнение,In Progress,0,Primavera P6,-8,65
-Construction_Phase1,1.0,Проектирование,Completed,0,MS Project,3,100
-Construction_Phase1,2.0,Фундамент,In Progress,0,MS Project,-12,40
+project_id,wbs_id,wbs_name,status,parent_id,source_system,variance_days,completion_pct,is_on_critical_path
+ERP_Migration,1.0,Инициация,Completed,0,Primavera P6,2,100,false
+ERP_Migration,2.0,Планирование,Completed,0,Primavera P6,1,100,false
+ERP_Migration,3.0,Выполнение,In Progress,0,Primavera P6,-8,65,true
+ERP_Migration,3.1,Миграция данных,In Progress,3.0,Primavera P6,-12,40,true
+ERP_Migration,3.2,Интеграция API,In Progress,3.0,Primavera P6,-5,70,false
+ERP_Migration,4.0,Тестирование,Not Started,0,Primavera P6,0,0,true
+Construction_Phase1,1.0,Проектирование,Completed,0,MS Project,3,100,false
+Construction_Phase1,2.0,Фундамент,In Progress,0,MS Project,-12,40,true
+Construction_Phase1,2.1,Земляные работы,Completed,2.0,MS Project,0,100,false
+Construction_Phase1,2.2,Бетонирование,In Progress,2.0,MS Project,-12,30,true
+Construction_Phase1,3.0,Каркас,Not Started,0,MS Project,0,0,true
+Mobile_App_Dev,1.0,Дизайн,Completed,0,Jira,2,100,false
+Mobile_App_Dev,2.0,Разработка,In Progress,0,Jira,0,80,true
+Mobile_App_Dev,2.1,Backend,In Progress,2.0,Jira,-3,75,false
+Mobile_App_Dev,2.2,Frontend,In Progress,2.0,Jira,0,85,true
+Mobile_App_Dev,3.0,Тестирование,In Progress,0,Jira,0,60,true

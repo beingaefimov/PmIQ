@@ -43,6 +43,7 @@ def filter_data(
         for row in data:
             # Ищем вшивание по именам, алиасам и описанию
             search_space = " ".join([
+                row.get("project_id", ""),
                 row.get("project_name", ""),
                 row.get("aliases", ""),
                 row.get("description", "")]).lower()

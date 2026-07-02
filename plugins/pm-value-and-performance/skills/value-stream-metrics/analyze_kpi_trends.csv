@@ -1,4 +1,13 @@
-project_name,metric_name,current_value,baseline_value,trend_percent,source_system
-Mobile_App_Dev,cycle_time_days,14.5,12.0,20.8,Jira + Power BI
-Mobile_App_Dev,throughput_per_week,12,15,-20.0,Jira + Power BI
-ERP_Migration,cycle_time_days,21.0,18.0,16.6,Jira + Power BI
+project_id,metric_name,current_value,baseline_value,trend_percent,period,source_system
+Mobile_App_Dev,cycle_time_days,14.5,12.0,20.8,2024-06,Jira + Power BI
+Mobile_App_Dev,throughput_per_week,12,15,-20.0,2024-06,Jira + Power BI
+Mobile_App_Dev,wip_count,18,12,50.0,2024-06,Jira + Power BI
+Mobile_App_Dev,lead_time_days,18.2,15.0,21.3,2024-06,Jira + Power BI
+ERP_Migration,cycle_time_days,21.0,18.0,16.6,2024-06,Jira + Power BI
+ERP_Migration,throughput_per_week,8,10,-20.0,2024-06,Jira + Power BI
+ERP_Migration,wip_count,25,20,25.0,2024-06,Jira + Power BI
+Construction_Phase1,cycle_time_days,30.0,28.0,7.1,2024-06,MS Project
+Construction_Phase1,throughput_per_week,3,4,-25.0,2024-06,MS Project
+RPA_Automation,cycle_time_days,10.0,12.0,-16.7,2024-06,Jira + Power BI
+RPA_Automation,throughput_per_week,20,18,11.1,2024-06,Jira + Power BI
+RPA_Automation,wip_count,8,10,-20.0,2024-06,Jira + Power BI

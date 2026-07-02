@@ -20,21 +20,61 @@ def render_widget(descriptor: dict[str, Any]) -> dict[str, Any] | None:
     data_rows = descriptor.get("data_rows", [])
     config = descriptor.get("config", {})
     title = descriptor.get("title", "")
+    
+    # Поддержка формата, где rows/columns на верхнем уровне
+    if not data_rows and "rows" in descriptor:
+        data_rows = descriptor["rows"]
+    if not config and "columns" in descriptor:
+        config = {"columns": descriptor["columns"]}
+    
     if widget_type in ("action_card", "ActionCard"):
         return _build_action_card(descriptor)
+    
+    if widget_type.lower() == "table":
+        if not data_rows:
+            return None
+        data_filter = config.get("data_filter", [])
+        if data_filter:
+            data_rows = [
+                r for r in data_rows
+                if all(
+                    _apply_filter(r, f.get("field"), f.get("operator", "eq"), f.get("value"))
+                    for f in data_filter)
+            ]
+            if not data_rows:
+                return None
+        return _build_table(data_rows, config, title)
+    
     if not data_rows:
         return None
+    
+    data_filter = config.get("data_filter", [])
+    if data_filter:
+        data_rows = [
+            r for r in data_rows
+            if all(
+                _apply_filter(r, f.get("field"), f.get("operator", "eq"), f.get("value"))
+                for f in data_filter)]
+        if not data_rows:
+            return None
+    
     builders = {
-        "BarChart":    _build_bar_chart,
-        "LineChart":   _build_line_chart,
-        "ScatterChart": _build_scatter_chart}
-    builder = builders.get(widget_type)
+        "barchart":     _build_bar_chart,
+        "linechart":    _build_line_chart,
+        "scatterchart": _build_scatter_chart,
+        "piechart":     _build_pie_chart,
+        "radarchart":   _build_radar_chart,
+        "gaugechart":   _build_gauge_chart}
+    
+    builder = builders.get(widget_type.lower())
     if builder is None:
         return None
+    
     try:
         option = builder(data_rows, config, title)
     except Exception as exc:
         option = _empty_option(f"{title} (ошибка рендеринга: {exc})")
+    
     return {"widget_type": "echarts",
             "chart_type": widget_type,
             "intent": descriptor.get("intent", ""),
@@ -59,31 +99,53 @@ def _build_bar_chart(rows: list[dict], cfg: dict, title: str) -> dict[str, Any]:
     x_field = cfg.get("x", "")
     y_field = cfg.get("y", "")
     y_formula = cfg.get("y_formula", "")
+    y_aggregation = cfg.get("y_aggregation", "")  # ← НОВОЕ
     c_field = cfg.get("color_field", y_field)
     horizontal = cfg.get("orientation") == "horizontal"
     y_scale = float(cfg.get("y_scale", 1))
     y_label = cfg.get("y_label", y_field)
-
-    def get_value(row: dict) -> float:
-        if y_formula:
-            parts = y_formula.replace(" ", "").split("-")
-            if len(parts) == 2:
-                try:
-                    return float(parts[0]) - float(row.get(parts[1], 0))
-                except ValueError:
-                    pass
-        # Если график горизонтальный, числовое значение берется из поля оси X (x_field)
-        target_field = x_field if horizontal else y_field
-        return float(row.get(target_field, 0)) * y_scale
-
-    categories = [str(row.get(x_field, "")) for row in rows]
-    values = [get_value(row) for row in rows]
-    colors = [
-        _resolve_color_by_value(row.get(c_field, 0), cfg.get("thresholds", []))
-        for row in rows]
-    series_data = [
-        {"value": round(v, 2), "itemStyle": {"color": c}}
-        for v, c in zip(values, colors)]
+    if y_aggregation == "count":
+        # Подсчитываем количество записей для каждого уникального значения x_field
+        from collections import OrderedDict
+        counts: dict[str, int] = OrderedDict()
+        for row in rows:
+            category = str(row.get(x_field, "Unknown"))
+            counts[category] = counts.get(category, 0) + 1
+        categories = list(counts.keys())
+        values = list(counts.values())
+        # Цвета определяются по имени категории а не по числовому значению
+        colors = [
+            _resolve_color_by_value(cat, cfg.get("thresholds", []))
+            for cat in categories
+        ]
+        series_data = [
+            {"value": v, "itemStyle": {"color": c}}
+            for v, c in zip(values, colors)
+        ]
+        # y_label по умолчанию для count-графиков
+        if not y_label or y_label == y_field:
+            y_label = "Количество"
+    else:
+        # Для обычных bar charts
+        def get_value(row: dict) -> float:
+            if y_formula:
+                parts = y_formula.replace(" ", "").split("-")
+                if len(parts) == 2:
+                    try:
+                        return float(parts[0]) - float(row.get(parts[1], 0))
+                    except ValueError:
+                        pass
+             # Если график горизонтальный, числовое значение берется из поля оси X (x_field)
+            target_field = x_field if horizontal else y_field
+            return float(row.get(target_field, 0)) * y_scale
+        categories = [str(row.get(x_field, "")) for row in rows]
+        values = [get_value(row) for row in rows]
+        colors = [
+            _resolve_color_by_value(row.get(c_field, 0), cfg.get("thresholds", []))
+            for row in rows]
+        series_data = [
+            {"value": round(v, 2), "itemStyle": {"color": c}}
+            for v, c in zip(values, colors)]
     series: dict[str, Any] = {
         "type": "bar",
         "data": series_data,
@@ -347,3 +409,175 @@ def _empty_option(message: str) -> dict[str, Any]:
         "title": {"text": message, "left": "center", "top": "center",
                   "textStyle": {"color": "#aaa", "fontSize": 13}},
         "series": []}
+
+def _build_pie_chart(rows: list[dict], cfg: dict, title: str) -> dict[str, Any]:
+    category_field = cfg.get("category_field", "")
+    value_agg = cfg.get("value_aggregation", "count")
+    colors_map = cfg.get("colors", {})
+    
+    counts: dict[str, int] = {}
+    for row in rows:
+        cat = str(row.get(category_field, "Unknown"))
+        counts[cat] = counts.get(cat, 0) + 1
+    
+    data = [
+        {"name": cat, "value": cnt,
+         "itemStyle": {"color": colors_map.get(cat, PALETTE["blue"])}}
+        for cat, cnt in counts.items()
+    ]
+    return {
+        "title": {"text": title, "left": "center"},
+        "tooltip": {"trigger": "item", "formatter": "{b}: {c} ({d}%)"},
+        "legend": {"bottom": 0},
+        "series": [{"type": "pie", "radius": ["30%", "60%"], "data": data,
+                    "label": {"formatter": "{b}\n{d}%"}}]
+    }
+
+def _build_radar_chart(rows: list[dict], cfg: dict, title: str) -> dict[str, Any]:
+    indicators = cfg.get("indicators", [])
+    series_field = cfg.get("series_field", "")
+    colors_list = cfg.get("colors", [PALETTE["blue"], PALETTE["green"], 
+        PALETTE["yellow"], PALETTE["red"]])
+    # Формируем индикаторы с max
+    radar_indicators = []
+    for ind in indicators:
+        name = ind["name"]
+        # max может быть задан явно или вычислен из данных
+        if "max" in ind:
+            max_val = ind["max"]
+        elif "max_field" in ind:
+            max_field = ind["max_field"]
+            try:
+                max_val = max(float(r.get(max_field, 0)) for r in rows) if rows else 100
+            except (ValueError, TypeError):
+                max_val = 100
+        else:
+            max_val = 100
+        radar_indicators.append({"name": name, "max": max_val})
+    # Группируем строки по series_field (если указан)
+    if series_field and rows:
+        groups: dict[str, list[dict]] = {}
+        for row in rows:
+            key = str(row.get(series_field, "Unknown"))
+            if key not in groups:
+                groups[key] = []
+            groups[key].append(row)
+    else:
+        groups = {"": rows}
+    # Формируем серии
+    series_data = []
+    for idx, (group_name, group_rows) in enumerate(groups.items()):
+        values = []
+        for ind in indicators:
+            # Имя поля: либо явно указано в field, либо получено из имени индикатора
+            field = ind.get("field", "")
+            if not field:
+                # Пробуем преобразовать имя индикатора в snake_case
+                field = ind["name"].lower().replace(" ", "_")
+            # Берём значение из первой строки группы
+            row = group_rows[0] if group_rows else {}
+            try:
+                val = float(row.get(field, 0))
+            except (ValueError, TypeError):
+                val = 0
+            values.append(val)
+        color = colors_list[idx % len(colors_list)] if colors_list else PALETTE["blue"]
+        series_data.append({
+            "name": group_name or title,
+            "value": values,
+            "lineStyle": {"color": color, "width": 2},
+            "itemStyle": {"color": color},
+            "areaStyle": {"color": color, "opacity": 0.1}
+        })
+    return {
+        "title": {"text": title, "left": "center"},
+        "tooltip": {},
+        "legend": {"bottom": 0, "data": [s["name"] for s in series_data]},
+        "radar": {"indicator": radar_indicators},
+        "series": [{"type": "radar", "data": series_data}]
+    }
+
+def _build_gauge_chart(rows: list[dict], cfg: dict, title: str) -> dict[str, Any]:
+    value_field = cfg.get("value_field", "value")
+    thresholds = cfg.get("thresholds", [])
+    # Берём значение из первой строки или вычисляем по формуле
+    if rows:
+        try:
+            if "-" in value_field:
+                parts = value_field.replace(" ", "").split("-")
+                value = float(parts[0]) - float(rows[0].get(parts[1], 0))
+            else:
+                value = float(rows[0].get(value_field, 0))
+        except (ValueError, TypeError):
+            value = 0
+    else:
+        value = 0
+    # Определяем цвет по порогам
+    color = PALETTE["blue"]
+    for t in sorted(thresholds, key=lambda x: x.get("value", 0), reverse=True):
+        if value >= t.get("value", 0):
+            color = t.get("color", PALETTE["blue"])
+            break
+    return {
+        "title": {"text": title, "left": "center"},
+        "series": [{
+            "type": "gauge",
+            "min": cfg.get("min", 0),
+            "max": cfg.get("max", 100),
+            "progress": {"show": True, "width": 18},
+            "axisLine": {"lineStyle": {"width": 18}},
+            "axisTick": {"show": False},
+            "splitLine": {"length": 15, "lineStyle": {"width": 2}},
+            "detail": {"valueAnimation": True, "formatter": "{value}%",
+                       "fontSize": 24, "color": color},
+            "title": {"show": False},
+            "data": [{"value": round(value, 1), "name": title,
+                      "itemStyle": {"color": color}}]
+        }]
+    }
+
+def _build_table(rows: list[dict], cfg: dict, title: str) -> dict[str, Any]:
+    """ Возвращает не ECharts-опцию, а конверт для HTML-таблицы """
+    columns = cfg.get("columns", [])
+    filters = cfg.get("filter", [])
+    
+    # Применяем фильтры
+    filtered = rows
+    for f in filters:
+        field = f.get("field")
+        op = f.get("operator", "eq")
+        value = f.get("value")
+        filtered = [r for r in filtered if _apply_filter(r, field, op, value)]
+    
+    return {
+        "widget_type": "table",  # Специальный тип для фронтенда
+        "title": title,
+        "columns": columns,
+        "rows": filtered
+    }
+
+def _apply_filter(row: dict, field: str, op: str, value: Any) -> bool:
+    """ Применяет один фильтр к строке данных """
+    if not field:
+        return True
+    row_val = row.get(field)
+    if row_val is None:
+        return False
+    try:
+        if op == "eq":
+            return str(row_val).strip().lower() == str(value).strip().lower()
+        if op == "in":
+            return row_val in value
+        if op == "not_in":
+            return row_val not in value
+        if op == "lt":
+            return float(row_val) < float(value)
+        if op == "gt":
+            return float(row_val) > float(value)
+        if op == "starts_with":
+            return str(row_val).startswith(str(value))
+        if op == "contains":
+            return str(value).lower() in str(row_val).lower()
+    except (TypeError, ValueError):
+        return False
+    return True

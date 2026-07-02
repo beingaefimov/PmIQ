@@ -1,4 +1,22 @@
-risk_id,project_name,scenario,estimated_delay_days,estimated_cost_impact,probability_of_occurrence,source_system
-R-001,ERP_Migration,Primary supplier goes bankrupt,30,1500000,0.15,Risk DB
-R-002,ERP_Migration,Key architect resigns,14,200000,0.25,Risk DB
-R-003,Construction_Phase1,Extreme weather for 2 weeks,10,300000,0.40,Risk DB
+risk_id,project_id,scenario,scenario_type,estimated_delay_days,estimated_cost_impact,probability_of_occurrence,source_system,period
+R-001,ERP_Migration,Primary supplier goes bankrupt,baseline,30,1500000,0.15,Risk DB,current
+R-001,ERP_Migration,Primary supplier goes bankrupt,optimistic,15,750000,0.08,Risk DB,current
+R-001,ERP_Migration,Primary supplier goes bankrupt,pessimistic,45,2250000,0.25,Risk DB,current
+R-001,ERP_Migration,Primary supplier goes bankrupt,baseline,25,1200000,0.20,Risk DB,previous
+R-002,ERP_Migration,Key architect resigns,baseline,14,200000,0.25,Risk DB,current
+R-002,ERP_Migration,Key architect resigns,optimistic,7,100000,0.12,Risk DB,current
+R-002,ERP_Migration,Key architect resigns,pessimistic,21,300000,0.40,Risk DB,current
+R-002,ERP_Migration,Key architect resigns,baseline,10,150000,0.18,Risk DB,previous
+R-003,Construction_Phase1,Extreme weather for 2 weeks,baseline,10,300000,0.40,Risk DB,current
+R-003,Construction_Phase1,Extreme weather for 2 weeks,optimistic,5,150000,0.20,Risk DB,current
+R-003,Construction_Phase1,Extreme weather for 2 weeks,pessimistic,15,450000,0.60,Risk DB,current
+R-003,Construction_Phase1,Extreme weather for 2 weeks,baseline,14,350000,0.50,Risk DB,previous
+R-010,ERP_Migration,Cybersecurity breach detected,baseline,60,2000000,0.10,Risk DB,current
+R-010,ERP_Migration,Cybersecurity breach detected,optimistic,30,1000000,0.05,Risk DB,current
+R-010,ERP_Migration,Cybersecurity breach detected,pessimistic,90,3000000,0.15,Risk DB,current
+R-013,Construction_Phase1,Material quality failure,baseline,20,600000,0.30,Risk DB,current
+R-013,Construction_Phase1,Material quality failure,optimistic,10,300000,0.15,Risk DB,current
+R-013,Construction_Phase1,Material quality failure,pessimistic,30,900000,0.50,Risk DB,current
+R-016,Data_Center,Power outage event,baseline,72,5000000,0.05,Risk DB,current
+R-016,Data_Center,Power outage event,optimistic,24,2000000,0.02,Risk DB,current
+R-016,Data_Center,Power outage event,pessimistic,120,8000000,0.10,Risk DB,current

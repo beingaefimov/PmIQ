@@ -5,7 +5,8 @@
       "args": ["../servers/unified_mock_server.py", "--plugin", "pm-agent-toolkit"],
       "tools": [
         "scaffold_declarative_agent",
-        "assess_project_complexity"
+        "assess_project_complexity",
+        "generate_app_schema"
       ],
       "env": {
         "COMPANY_WIKI_API_URL": "${COMPANY_WIKI_API_URL}",

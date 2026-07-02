@@ -1,3 +1,9 @@
-po_id,project_name,item,supplier,status,expected_delivery,variance_days,source_system
-PO-2024-001,ERP_Migration,Dell Servers,Dell Tech,In Transit,2024-06-15,0,SAP MM
-PO-2024-002,Construction_Phase1,Concrete M500,StroyMat,Delayed,2024-06-01,10,SAP MM
+po_id,project_id,item,supplier,status,expected_delivery,variance_days,source_system,critical_path,cost_impact
+PO-2024-001,ERP_Migration,Dell Servers,Dell Tech,In Transit,2024-06-15,0,SAP MM,true,0
+PO-2024-002,Construction_Phase1,Concrete M500,StroyMat,Delayed,2024-06-01,10,SAP MM,true,+50000
+PO-2024-003,Mobile_App_Dev,AWS Licenses,Amazon,On Track,2024-07-01,0,SAP MM,false,0
+PO-2024-004,Construction_Phase1,Steel Rebar,MetalSupply,Delayed,2024-06-05,7,SAP MM,true,+30000
+PO-2024-005,ERP_Migration,Network Equipment,Cisco,In Transit,2024-06-20,0,SAP MM,false,0
+PO-2024-006,Data_Center,Cooling Systems,CoolTech,On Track,2024-08-01,0,SAP MM,true,0
+PO-2024-007,Construction_Phase1,Safety Equipment,SafeGear,Delivered,2024-05-30,0,SAP MM,false,0
+PO-2024-008,RPA_Automation,Software Licenses,UiPath,On Track,2024-07-15,0,SAP MM,false,0

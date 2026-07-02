@@ -11,6 +11,7 @@ copilot plugin install ./plugins/pm-project-core
 ## Available Skills
 | Skill Name | Description |
 |------------|-------------|
+| `project-identifier` | Идентифицирует проект по нечёткому запросу пользователя. |
 | `pm-schedule-tracker` | Tracks project schedules, critical paths, WBS, and milestone statuses. |
 | `document-tracker` | Tracks the approval status of key project documents (SOW, specs, drawings). |
 
@@ -18,3 +19,4 @@ copilot plugin install ./plugins/pm-project-core
 - "What is the critical path for the ERP Migration project?"
 - "Show me the approval status of the technical specification document."
 - "Are we on track to hit the Q3 milestone?"
+- "Найди проект по запросу 'стройка'"

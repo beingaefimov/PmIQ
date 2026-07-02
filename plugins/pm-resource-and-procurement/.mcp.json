@@ -8,7 +8,8 @@
         "get_procurement_status",
         "get_contractor_performance",
         "get_equipment_availability",
-        "get_material_delivery_schedule"
+        "get_material_delivery_schedule",
+        "get_skill_gap"
       ],
       "env": {
         "WORKDAY_API_ENDPOINT": "${WORKDAY_API_ENDPOINT}",

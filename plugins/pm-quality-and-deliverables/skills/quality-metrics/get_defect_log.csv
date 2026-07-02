@@ -1,4 +1,10 @@
-project_name,defect_id,severity,status,raised_date,component,source_system
-ERP_Migration,D-001,High,Open,2024-06-05,Migration Module,QMS
-ERP_Migration,D-002,Medium,In Progress,2024-06-07,API Integration,QMS
-Mobile_App_Dev,D-003,Low,Closed,2024-05-20,UI Frontend,QMS
+project_id,defect_id,severity,status,raised_date,component,source_system,days_open,assigned_to,rework_hours
+ERP_Migration,D-001,High,Open,2024-06-05,Migration Module,QMS,23,Dev Team,40
+ERP_Migration,D-002,Medium,In Progress,2024-06-07,API Integration,QMS,21,Backend Team,20
+ERP_Migration,D-003,Low,Closed,2024-05-20,UI Frontend,QMS,0,Frontend Team,8
+Mobile_App_Dev,D-004,High,Open,2024-06-10,Payment Gateway,QMS,18,Backend Team,32
+Mobile_App_Dev,D-005,Medium,In Progress,2024-06-12,Push Notifications,QMS,16,Mobile Team,16
+Mobile_App_Dev,D-006,Low,Closed,2024-05-25,UI Alignment,QMS,0,QA Team,4
+Construction_Phase1,D-007,Critical,Open,2024-06-01,Concrete Quality,QMS,27,Site Engineer,120
+Construction_Phase1,D-008,High,In Progress,2024-06-08,Rebar Installation,QMS,20,Quality Inspector,80
+RPA_Automation,D-009,Medium,Open,2024-06-15,Bot Execution Logic,QMS,13,Dev Team,24

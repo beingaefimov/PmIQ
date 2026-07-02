@@ -1,4 +1,7 @@
-project_name,status,start_date,end_date,completion_pct,critical_path_variance_days,source_system
-ERP_Migration,In Progress,2024-01-15,2024-12-31,65,-5,Primavera P6
-Construction_Phase1,Delayed,2023-06-01,2025-08-30,40,-14,MS Project
-Mobile_App_Dev,On Track,2024-03-01,2024-09-30,80,0,Jira
+project_id,status,start_date,end_date,completion_pct,critical_path_variance_days,source_system,baseline_end_date,days_to_completion
+ERP_Migration,In Progress,2024-01-15,2024-12-31,65,-5,Primavera P6,2024-12-25,185
+Construction_Phase1,Delayed,2023-06-01,2025-08-30,40,-14,MS Project,2025-08-15,428
+Mobile_App_Dev,On Track,2024-03-01,2024-09-30,80,0,Jira,2024-09-30,94
+Data_Center,Planning,2024-09-01,2025-12-31,5,0,MS Project,2025-12-31,551
+Bridge_Project,Planning,2025-01-01,2027-06-30,0,0,Primavera P6,2027-06-30,1097
+RPA_Automation,In Progress,2024-04-01,2024-11-30,45,-3,Jira,2024-11-27,155

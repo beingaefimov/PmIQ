@@ -489,6 +489,82 @@
             min-height: 360px;
         }
 
+        .table-wrapper {
+            background: var(--bg-surface-2);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 1.25rem 1.25rem 1rem;
+        }
+
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+            margin-top: 0.25rem;
+        }
+
+        .data-table th,
+        .data-table td {
+            border: 1px solid var(--border);
+            padding: 0.65rem 0.85rem;
+            text-align: left;
+            vertical-align: middle;
+        }
+
+        .data-table th {
+            background: var(--bg-deep);
+            color: var(--text);
+            font-weight: 600;
+            font-size: 0.82rem;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            cursor: pointer;
+            user-select: none;
+            position: relative;
+            transition: background 0.15s, color 0.15s;
+            white-space: nowrap;
+        }
+
+        .data-table th:hover {
+            background: var(--bg-surface);
+            color: var(--accent);
+        }
+
+        .data-table th::after {
+            content: '⇅';
+            margin-left: 0.5rem;
+            color: var(--text-dim);
+            font-size: 0.75rem;
+            opacity: 0.5;
+        }
+
+        .data-table th.sort-asc::after  { content: '↑'; color: var(--accent); opacity: 1; }
+        .data-table th.sort-desc::after { content: '↓'; color: var(--accent); opacity: 1; }
+
+        .data-table tbody tr {
+            transition: background 0.15s;
+        }
+
+        .data-table tbody tr:hover td {
+            background: var(--bg-surface);
+        }
+
+        .data-table tbody tr:nth-child(even) td {
+            background: rgba(255, 255, 255, 0.015);
+        }
+
+        .data-table td {
+            color: var(--text);
+            font-size: 0.9rem;
+        }
+
+        @media (max-width: 640px) {
+            .data-table { font-size: 0.82rem; }
+            .data-table th,
+            .data-table td { padding: 0.5rem 0.6rem; }
+            .table-wrapper { padding: 1rem; }
+        }
+
         .json-details {
             margin-top: 0.85rem;
             border-top: 1px solid var(--border-soft);
@@ -926,13 +1002,17 @@
 
             chartsContainer.innerHTML = '';
             clearCharts();
+            const extractedWidgets = extractWidgetsFromMarkdown(responseContent);
+            const allWidgets = [...extractedWidgets, ...(data.widgets || [])];
 
-            if (data.widgets && data.widgets.length > 0) {
-                data.widgets.forEach((widget, index) => {
+            if (allWidgets.length > 0) {
+                allWidgets.forEach((widget, index) => {
                     if (widget.chart_type === 'ActionCard') {
                         renderActionCard(widget, chartsContainer);
                     } else if (widget.widget_type === 'echarts') {
                         renderECharts(widget, chartsContainer, index);
+                    } else if (widget.widget_type === 'table') {
+                        renderTable(widget, chartsContainer);
                     }
                 });
             }
@@ -947,6 +1027,33 @@
                     window.dispatchEvent(new Event('resize'));
                 });
             });
+        }
+
+        // Извлекает JSON-блоки с виджетами из markdown
+        function extractWidgetsFromMarkdown(container) {
+            const widgets = [];
+            // Ищем все <pre><code> блоки
+            const codeBlocks = container.querySelectorAll('pre code');
+            codeBlocks.forEach(codeBlock => {
+                const text = codeBlock.textContent.trim();
+                if (text.startsWith('{') && text.includes('"widget_type"')) {
+                    try {
+                        const widget = JSON.parse(text);
+                        if (widget.widget_type) {
+                            widgets.push(widget);
+                            // Удаляем этот блок из DOM чтобы не дублировался
+                            const pre = codeBlock.parentElement;
+                            if (pre && pre.tagName === 'PRE') {
+                                pre.remove();
+                            }
+                        }
+                    } catch (e) {
+                        // Не валидный JSON, пропускаем
+                        console.warn('Failed to parse widget JSON:', e);
+                    }
+                }
+            });
+            return widgets;
         }
 
         function renderECharts(widget, container, index) {
@@ -979,6 +1086,116 @@
             chart.setOption(widget.option, true);
 
             charts.push(chart);
+        }
+
+        function renderTable(widget, container) {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'table-wrapper';
+
+            const title = document.createElement('div');
+            title.className = 'chart-title';
+            title.textContent = widget.title || 'Таблица данных';
+
+            const table = document.createElement('table');
+            table.className = 'data-table';
+
+            const columns = widget.columns || [];
+            const rows = widget.rows || [];
+
+            const thead = document.createElement('thead');
+            const headerRow = document.createElement('tr');
+            columns.forEach(col => {
+                const th = document.createElement('th');
+                th.textContent = col.label || col.field;
+                th.dataset.field = col.field;
+                th.dataset.type = col.type || 'string';
+                // Клик по заголовку - сортировка
+                th.addEventListener('click', () => sortTable(table, col.field, col.type || 'string'));
+                headerRow.appendChild(th);
+            });
+            thead.appendChild(headerRow);
+            table.appendChild(thead);
+
+            const tbody = document.createElement('tbody');
+            rows.forEach(row => {
+                const tr = document.createElement('tr');
+                columns.forEach(col => {
+                    const td = document.createElement('td');
+                    const value = row[col.field];
+                    td.textContent = value !== undefined && value !== null ? value : '—';
+
+                    // Подсветка по порогам, если они заданы
+                    if (col.thresholds && value !== undefined && value !== null) {
+                        const color = resolveColor(value, col.thresholds);
+                        if (color) {
+                            td.style.color = color;
+                            td.style.fontWeight = '600';
+                        }
+                    }
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            });
+            table.appendChild(tbody);
+
+            const details = document.createElement('details');
+            details.className = 'json-details';
+            const summary = document.createElement('summary');
+            summary.textContent = 'Показать исходный JSON';
+            const pre = document.createElement('pre');
+            pre.textContent = JSON.stringify(widget, null, 2);
+            details.appendChild(summary);
+            details.appendChild(pre);
+
+            wrapper.appendChild(title);
+            wrapper.appendChild(table);
+            wrapper.appendChild(details);
+            container.appendChild(wrapper);
+        }
+
+        // Сортировка таблицы по клику на заголовок
+        function sortTable(table, field, type) {
+            const tbody = table.querySelector('tbody');
+            const rows = Array.from(tbody.querySelectorAll('tr'));
+            const headers = table.querySelectorAll('thead th');
+            const colIndex = Array.from(headers).findIndex(h => h.dataset.field === field);
+            if (colIndex === -1) return;
+            const currentDir = headers[colIndex].dataset.sortDir || 'none';
+            const newDir = currentDir === 'asc' ? 'desc' : 'asc';
+            headers.forEach(h => { h.dataset.sortDir = 'none'; h.classList.remove('sort-asc', 'sort-desc'); });
+            headers[colIndex].dataset.sortDir = newDir;
+            headers[colIndex].classList.add(newDir === 'asc' ? 'sort-asc' : 'sort-desc');
+            rows.sort((a, b) => {
+                const aVal = a.children[colIndex].textContent.trim();
+                const bVal = b.children[colIndex].textContent.trim();
+                if (type === 'number') {
+                    const aNum = parseFloat(aVal) || 0;
+                    const bNum = parseFloat(bVal) || 0;
+                    return newDir === 'asc' ? aNum - bNum : bNum - aNum;
+                }
+                return newDir === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+            });
+            rows.forEach(row => tbody.appendChild(row));
+        }
+
+        // Разрешение цвета по порогам (аналог _resolve_color_by_value из Python)
+        function resolveColor(value, thresholds) {
+            const numVal = parseFloat(value);
+            if (!isNaN(numVal)) {
+                // Числовые пороги
+                const sorted = [...thresholds].sort((a, b) => (b.value || 0) - (a.value || 0));
+                for (const t of sorted) {
+                    if (numVal >= t.value) return t.color;
+                }
+                return sorted[sorted.length - 1]?.color || null;
+            } else {
+                // Строковые пороги
+                const valStr = String(value).toLowerCase();
+                for (const t of thresholds) {
+                    if (String(t.value).toLowerCase() === valStr) return t.color;
+                }
+            }
+            return null;
         }
 
         function renderActionCard(widget, container) {

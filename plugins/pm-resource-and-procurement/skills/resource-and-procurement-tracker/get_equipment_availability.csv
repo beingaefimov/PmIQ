@@ -1,3 +1,5 @@
-equipment_type,project_name,availability_pct,next_maintenance_date,status,source_system
-Tower_Crane_K1,Construction_Phase1,85,2024-07-01,Operational,Maximo
-Server_Rack_Dell,ERP_Migration,100,2024-08-15,Operational,Maximo
+equipment_type,project_id,availability_pct,next_maintenance_date,status,downtime_days,utilization_pct,last_failure_date,source_system
+Tower_Crane_K1,Construction_Phase1,85,2024-07-01,Operational,5,78,2024-05-15,Maximo
+Server_Rack_Dell,ERP_Migration,100,2024-08-15,Operational,0,92,,Maximo
+Concrete_Pump_CP1,Construction_Phase1,60,2024-06-20,Failed,12,45,2024-06-10,Maximo
+Excavator_EX1,Construction_Phase1,90,2024-07-15,Operational,3,85,2024-05-28,Maximo

@@ -21,7 +21,6 @@ from agent_utils import (
     is_consecutive_duplicate)
 from concentrator import SPECIAL_WIDGET_TYPES
 
-
 # "concentrator" - ReAct-цикл с историей диалога + концентратор знаний.
 # "stateless" - повторный роутинг каждую итерацию,
 #               накопление фактических данных вместо истории,
@@ -203,6 +202,141 @@ class PmIqAgent:
         response = await loop.run_in_executor(None, sync_call)
         return response.choices[0].message.content
 
+    def _expand_plugins_with_dependencies(self, selected_plugins: List[str]) -> List[str]:
+        """ Расширяет список плагинов итеративно:
+        Шаг 1: по инструментам (один проход по разделу перечня инструментов и упоминаниям в виджетах)
+        Шаг 2: по зависимостям скиллов (итеративно, пока список не стабилизируется) """
+        tool_to_plugin = self._build_tool_to_plugin_map()
+        skill_to_plugin = self._build_skill_to_plugin_map()
+        current_plugins = list(dict.fromkeys(selected_plugins))
+        # Шаг 1: Расширение по инструментам
+        mentioned_tools: set = set()
+        for plugin_name in current_plugins:
+            plugin = self._get_plugin_by_name(plugin_name)
+            if not plugin:
+                continue
+            for skill in plugin["skills"]:
+                tools_from_section = self._extract_tools_from_skill_section(
+                    skill.get("instructions", ""))
+                mentioned_tools.update(tools_from_section)
+                for widget_def in skill.get("available_widgets", []):
+                    for intent in widget_def.get("intents", []):
+                        tool_name = intent.get("tool")
+                        if tool_name:
+                            mentioned_tools.add(tool_name)
+        plugins_by_tools: List[str] = []
+        for tool_name in mentioned_tools:
+            if tool_name in tool_to_plugin:
+                plugin_name = tool_to_plugin[tool_name]
+                if plugin_name not in current_plugins and plugin_name not in plugins_by_tools:
+                    plugins_by_tools.append(plugin_name)
+        if plugins_by_tools:
+            print(f"[EXPAND-1] По инструментам добавлены плагины: {plugins_by_tools}")
+            for tool_name in mentioned_tools:
+                if tool_to_plugin.get(tool_name) in plugins_by_tools:
+                    print(f"  - инструмент {tool_name} из плагина {tool_to_plugin[tool_name]}")
+        current_plugins = list(dict.fromkeys(current_plugins + plugins_by_tools))
+        # Шаг 2: Расширение по зависимостям скиллов (итеративно)
+        iteration = 0
+        while True:
+            iteration += 1
+            plugins_before = len(current_plugins)
+            mentioned_skills: set = set()
+            for plugin_name in current_plugins:
+                plugin = self._get_plugin_by_name(plugin_name)
+                if not plugin:
+                    continue
+                for skill in plugin["skills"]:
+                    deps = self._extract_dependencies_from_skill_section(
+                        skill.get("instructions", ""))
+                    mentioned_skills.update(deps)
+            plugins_by_skills: List[str] = []
+            for skill_name in mentioned_skills:
+                if skill_name in skill_to_plugin:
+                    plugin_name = skill_to_plugin[skill_name]
+                    if plugin_name not in current_plugins and plugin_name not in plugins_by_skills:
+                        plugins_by_skills.append(plugin_name)
+            if not plugins_by_skills:
+                break
+            print(f"[EXPAND-2.{iteration}] По зависимостям скиллов добавлены плагины: {plugins_by_skills}")
+            for skill_name in mentioned_skills:
+                if skill_to_plugin.get(skill_name) in plugins_by_skills:
+                    print(f"  - скилл {skill_name} из плагина {skill_to_plugin[skill_name]}")
+            current_plugins = list(dict.fromkeys(current_plugins + plugins_by_skills))
+            if len(current_plugins) == plugins_before:
+                break
+            if iteration > 10:
+                print("[EXPAND-2] ПРЕДУПРЕЖДЕНИЕ: Достигнут лимит итераций (10).")
+                break
+        return current_plugins
+
+    def _build_tool_to_plugin_map(self) -> Dict[str, str]:
+        """ Маппинг имени инструмента в имя плагина """
+        mapping: Dict[str, str] = {}
+        for plugin in self.structure.plugins:
+            if plugin.get("mcp_config"):
+                for server_cfg in plugin["mcp_config"].get("mcpServers", {}).values():
+                    for tool_name in server_cfg.get("tools", []):
+                        mapping[tool_name] = plugin["name"]
+        return mapping
+
+    def _build_skill_to_plugin_map(self) -> Dict[str, str]:
+        """ Маппинг имени скилла в имя плагина """
+        mapping: Dict[str, str] = {}
+        for plugin in self.structure.plugins:
+            for skill in plugin["skills"]:
+                skill_name = skill.get("name")
+                if skill_name:
+                    mapping[skill_name] = plugin["name"]
+        return mapping
+
+    def _get_plugin_by_name(self, plugin_name: str) -> Optional[Dict[str, Any]]:
+        """ Находит плагин по имени """
+        for plugin in self.structure.plugins:
+            if plugin["name"] == plugin_name:
+                return plugin
+        return None
+
+    def _extract_tools_from_skill_section(self, instructions: str) -> List[str]:
+        """ Извлекает имена инструментов из раздела '## Required Tools' """
+        section_patterns = [
+            r'##\s*Required\s+Tools',
+            r'##\s*Используемые\s+MCP\s+инструменты',
+            r'##\s*Using\s+MCP\s+tools',
+            r'##\s*MCP\s+tools\s+used']
+        section_start = -1
+        for pattern in section_patterns:
+            match = re.search(pattern, instructions, re.IGNORECASE)
+            if match:
+                section_start = match.end()
+                break
+        if section_start == -1:
+            return []
+        remaining = instructions[section_start:]
+        next_heading = re.search(r'\n##\s+', remaining)
+        section_text = remaining[:next_heading.start()] if next_heading else remaining
+        return re.findall(r'[-*]\s*`([a-z][a-z0-9_]+)`', section_text)
+
+    def _extract_dependencies_from_skill_section(self, instructions: str) -> List[str]:
+        """ Извлекает имена зависимых скиллов из раздела '## Dependencies / Required Skills' """
+        section_patterns = [
+            r'##\s*Dependencies\s*/\s*Required\s+Skills',
+            r'##\s*Required\s+Skills',
+            r'##\s*Dependencies',
+            r'##\s*Зависимости']
+        section_start = -1
+        for pattern in section_patterns:
+            match = re.search(pattern, instructions, re.IGNORECASE)
+            if match:
+                section_start = match.end()
+                break
+        if section_start == -1:
+            return []
+        remaining = instructions[section_start:]
+        next_heading = re.search(r'\n##\s+', remaining)
+        section_text = remaining[:next_heading.start()] if next_heading else remaining
+        return re.findall(r'[-*]\s*`([a-z][a-z0-9_-]+)`', section_text)
+    
     async def route_query(self, query: str,
         accumulated_data: str = "") -> List[str]:
         """ Выбор 1–3 релевантных плагинов по вопросу.
@@ -243,8 +377,8 @@ class PmIqAgent:
         plugins_summary = []
         for p in self.structure.plugins:
             skills_desc = "\n    ".join(
-                [f"- {s['name']}: {s['description']}" for s in p["skills"]])
-            plugins_summary.append(f"### {p['name']}\n    {skills_desc}")
+                [f"- методичка {s['name']}: {s['description']}" for s in p["skills"]])
+            plugins_summary.append(f"### Домен-плагин {p['name']}\n    {skills_desc}")
 
         data_section = ""
         if accumulated_data:
@@ -260,11 +394,11 @@ class PmIqAgent:
             "- Если запрос упоминает НЕСКОЛЬКО аспектов (например, задержки И "
             "бюджет, расписание И риски), вы ОБЯЗАНЫ выбрать ВСЕ релевантные "
             "плагины, а не только один.\n"
-            "- Внимательно читайте описания скиллов. Каждое описание объясняет, "
-            "какие типы запросов обрабатывает скилл.\n"
-            "- Сопоставляйте intent пользователя с теми скиллами, чьи описания "
+            "- Внимательно читайте описания методичек плагинов ниже. Описания объясняет, "
+            "какие типы запросов обрабатывает методичка в этом домене-плагине.\n"
+            "- Сопоставляйте intent пользователя с теми методичками, чьи описания "
             "покрывают релевантные аспекты.\n\n"
-            f"Доступные домены со скиллами:\n{chr(10).join(plugins_summary)}\n"
+            f"Доступные домены-плагины с методичками:\n{chr(10).join(plugins_summary)}\n"
             f"{data_section}\n"
             f"Запрос пользователя: {query}\n\n"
             "Ответьте ТОЛЬКО валидным JSON-массивом имён плагинов.\n"
@@ -734,12 +868,12 @@ class PmIqAgent:
                         f"{json.dumps(config, ensure_ascii=False, indent=2)}")
                 else:
                     config_line = (
-                        f"- Config: см. в ЗНАНИЯХ выше (YAML-блок available_widgets "
-                        f"скилла {skill}). Найдите по имени intent '{w.get('intent', '')}'.")
+                        f"- Config: см. в МЕТОДИЧКЕ выше (YAML-блок available_widgets "
+                        f"методички {skill}). Найдите по имени intent '{w.get('intent', '')}'.")
                 return (
                     f"##### Intent: {w['intent']} (тип: {w['widget_type']})\n"
                     f"- Описание (для чего): {desc}\n"
-                    f"- Из скилла: {skill}\n"
+                    f"- Из методички: {skill}\n"
                     f"- Предлагаемый заголовок: {w.get('title_hint', '')}\n"
                     f"- Обоснование: {w.get('rationale', '')}\n"
                     f"{config_line}")
@@ -749,7 +883,7 @@ class PmIqAgent:
                 "ИХ НЕЛЬЗЯ рендерить через <!-- SYSTEM_WIDGET --> placeholder!\n"
                 "В Final Answer сгенерируйте полный JSON-блок ОБЯЗАТЕЛЬНО обёрнутый\n"
                 "в ```json ... ``` ограждения.\n\n"
-                "Выполняй требования description этого виджета из скилла. Например:\n"
+                "Выполняй требования description этого виджета из методички. Например:\n"
                 "```json\n"
                 "{\n"
                 '  "widget_type": "action_card",\n'
@@ -795,7 +929,7 @@ class PmIqAgent:
 Вы — экспертный Помощник по Управлению Проектами, придерживающийся принципов PMBOK 8.
 В данный момент вы работаете в доменах: {plugins_str}
 
-## ЗНАНИЯ (скиллсы)
+## МЕТОДИЧКИ
 {knowledge_section}
 
 ## ЗАПЛАНИРОВАННЫЕ ВИДЖЕТЫ — СИСТЕМНЫЕ (вы создаёте в Final Answer только <!-- SYSTEM_WIDGET --> placeholder)
@@ -819,14 +953,14 @@ class PmIqAgent:
    - ВАШ ПЕРВЫЙ ВЫЗОВ ИНСТРУМЕНТА ОБЯЗАТЕЛЬНО ДОЛЖЕН БЫТЬ: `identify_project`
    - Action Input: {{"query": "<вставьте сюда как пользователь назвал проект>"}}
    - Дождаться Observation с точным `project_id`.
-   - Используйте полученный `project_id` (например, "Construction_Phase1") как фильтр в следующем инструменте (например, Action Input: {{"project_name": "Construction_Phase1"}}).
+   - Используйте полученный `project_id` (например, "Construction_Phase1") как фильтр в следующем инструменте (например, Action Input: {{"project_id": "Construction_Phase1"}}).
 
 1. **ЦЕЛОСТНОСТЬ ДАННЫХ:**
    - Observation содержит JSON с основным полем `data` — это Markdown-таблица.
    - Используйте ТОЛЬКО данные из поля `data`. НИКОГДА не выдумывайте имена/числа.
    - **МАППИНГ СУЩНОСТЕЙ:** сопоставляйте разговорные названия с точными системными именами.
    - В Final Answer и в `data_rows` виджетов ВСЕГДА используйте ТОЛЬКО точные системные имена.
-   - **ИМЕНА ИНСТРУМЕНТОВ:** вызывайте ТОЛЬКО инструменты, упомянутые в ЗНАНИЯХ, ПЛАНЕ или ПРЕДЛАГАЕМОМ ПОРЯДКЕ ИНСТРУМЕНТОВ.
+   - **ИМЕНА ИНСТРУМЕНТОВ:** вызывайте ТОЛЬКО инструменты, упомянутые в МЕТОДИЧКАХ, ПЛАНЕ или ПРЕДЛАГАЕМОМ ПОРЯДКЕ ИНСТРУМЕНТОВ.
    - **СИНТАКСИС ФИЛЬТРОВ:** в плейсхолдере `FILTER: {{}}` передавайте ТОЛЬКО простые значения или массивы строк. ЗАПРЕЩЕНО `{{"$regex": "..."}}` или `{{"$gt": 10}}`.
 
 2. **ОТОБРАЖЕНИЕ ВИДЖЕТОВ:**
@@ -865,6 +999,8 @@ class PmIqAgent:
         except Exception as e:
             print(f"Ошибка маршрутизации: {e}")
             return "Не удалось определить контекст запроса."
+        # Расширяем плагины на основе кросс-ссылок в скиллах
+        selected_plugins = self._expand_plugins_with_dependencies(selected_plugins)
         active_tools = [t for t in self.all_tools if t["plugin"] in selected_plugins]
         if not active_tools:
             return "Не удалось найти подходящие инструменты."
@@ -912,7 +1048,6 @@ class PmIqAgent:
                 print(f"Ошибка обращения к LLM: {e}")
                 return "Ошибка подключения к LLM."
             parsed = parse_llm_response(llm_text)
-
             if parsed["type"] == "action":
                 clean_msg = (
                     f"Thought: {parsed.get('thought', '')}\n"
@@ -921,7 +1056,6 @@ class PmIqAgent:
                 history.append({"role": "assistant", "content": clean_msg})
             else:
                 history.append({"role": "assistant", "content": llm_text})
-
             if parsed["type"] == "hallucinated_observation":
                 history.append({"role": "user", "content": (
                     "ОШИБКА: вы написали 'Observation:' без 'Action:'. Это нарушение "
@@ -929,7 +1063,6 @@ class PmIqAgent:
                     "Начните с 'Thought:' и вызовите инструмент, либо выдайте "
                     "'Final Answer:'.")})
                 continue
-
             if parsed["type"] == "thought":
                 # Механизм прощения: LLM забыла "Final Answer:", но сгенерировала виджеты
                 is_likely_final = (
@@ -978,7 +1111,6 @@ class PmIqAgent:
                     "- если данных НЕДОСТАТОЧНО — вызовите инструмент;\n"
                     "- если данных ДОСТАТОЧНО — выдайте 'Final Answer:'.")})
                 continue
-            
             if parsed["type"] == "final_answer":
                 answer_text = parsed["answer"]
                 # Эвристика: если ответ подозрительно короткий и не содержит виджетов 
@@ -1014,10 +1146,9 @@ class PmIqAgent:
                 final_text = self._postprocess_final_answer(parsed["answer"])
                 print(f"Финальный ответ:\n{final_text}\n")
                 return final_text
-
             action = parsed["action"]
             action_input_str = parsed["action_input"]
-            # Маппинги skill→tool, plugin→tool
+            # Маппинги skill в tool, plugin в tool
             tool = next((t for t in active_tools if t["name"] == action), None)
             if not tool:
                 if action in skill_to_tool_map:
@@ -1036,7 +1167,6 @@ class PmIqAgent:
                     action = matches[0]
                     tool = next(t for t in active_tools if t["name"] == action)
                     print(f"Автоисправление (fuzzy): -> '{action}'")
-
             if not tool:
                 observation = (
                     f"Error: Tool '{parsed['action']}' not found in active tools. "
@@ -1077,7 +1207,6 @@ class PmIqAgent:
                     import traceback
                     traceback.print_exc()
                     observation = f"Error executing tool: {e}"
-
             print(f"Observation (для консоли):\n{observation[:600]}")
             history.append({"role": "user",
                             "content": f"Observation: {observation}"})
@@ -1092,7 +1221,7 @@ class PmIqAgent:
         recent_calls_warning: str = "") -> str:
         """ReAct-промпт для stateless-режима.
         Ключевые отличия от history-режима:
-        - В промпт подаются полные методологии отобранных плагинов (без сжатия).
+        - В промпт подаются полные методички отобранных плагинов (без сжатия).
         - В промпт подаётся накопленный блок фактических данных (а не история).
         - Даётся указание составить план и выполнить первый шаг.
         - Все правила в отношении виджетов обоих типов - как в режиме history.
@@ -1100,7 +1229,7 @@ class PmIqAgent:
           состоит из одного шага (финального ответа) """
         plugins_str = ", ".join(selected_plugins)
 
-        # Полные методологии отобранных плагинов
+        # Полные методички отобранных плагинов
         methodologies_parts: List[str] = []
         widgets_catalog_parts: List[str] = []
         for plugin in self.structure.plugins:
@@ -1108,9 +1237,9 @@ class PmIqAgent:
                 continue
             for skill in plugin["skills"]:
                 methodologies_parts.append(
-                    f"=== Скилл: {skill['name']} (плагин: {plugin['name']}) ===\n"
+                    f"=== Методичка (skill): {skill['name']} (плагин: {plugin['name']}) ===\n"
                     f"{skill['instructions']}")
-                # Отдельно — каталог виджетов с дословным config
+                # Отдельно каталог виджетов с дословным config
                 for widget_def in skill.get("available_widgets", []):
                     w_type = widget_def.get("type", "")
                     for intent in widget_def.get("intents", []):
@@ -1156,10 +1285,10 @@ class PmIqAgent:
 Вы — экспертный Помощник по Управлению Проектами, придерживающийся принципов PMBOK 8.
 В данный момент вы работаете в доменах: {plugins_str}
 
-## МЕТОДОЛОГИИ (полные, изучите ВНИМАТЕЛЬНО, включая правила виджетов)
+## МЕТОДИЧКИ (изучите ВНИМАТЕЛЬНО, включая правила виджетов)
 {methodologies}
 
-## КАТАЛОГ ВИДЖЕТОВ (config — ДОСЛОВНО из методологий)
+## КАТАЛОГ ВИДЖЕТОВ
 {widgets_catalog}
 
 ## ДОСТУПНЫЕ ИНСТРУМЕНТЫ
@@ -1174,7 +1303,7 @@ class PmIqAgent:
 
 ## ИНСТРУКЦИЯ
 
-1. Изучите методологии выше (включая сведения о виджетах: их типы, config,
+1. Изучите методички выше (включая сведения о виджетах: их типы, config,
    правила фильтрации данных, описания intents).
 
 2. **ОПРЕДЕЛИТЕ ВИДЖЕТЫ ФИНАЛЬНОГО ОТВЕТА.** Какой бы вопрос ни был задан,
@@ -1252,7 +1381,7 @@ class PmIqAgent:
 **ВИДЖЕТ ТИП Б: МОДЕЛЬНЫЕ ВИДЖЕТЫ (action_card и др.)**
 ИХ НЕЛЬЗЯ рендерить через <!-- SYSTEM_WIDGET --> placeholder!
 В Final Answer сгенерируйте полный JSON-блок, ОБЯЗАТЕЛЬНО обёрнутый в ```json ... ```.
-Выполняй требования description этого виджета из скилла. Например:
+Выполняй требования description этого виджета из методички. Например:
 ```json
 {{
   "widget_type": "action_card",
@@ -1407,21 +1536,24 @@ Final Answer: <текст ответа>
         не накапливается. Анти-loop через стек последних 2 вызовов """
         accumulated: List[Tuple[str, Dict[str, Any], str]] = []
         self._recent_calls_stack.clear()
-
         for iteration in range(_MAX_ITERATIONS_STATELESS):
             print(f"\n{'=' * 80}\n[STATELESS Итерация {iteration + 1}]\n{'=' * 80}")
             accumulated_data = self._format_accumulated_data(accumulated)
             recent_warning = self._format_recent_calls_warning()
-            # Роутинг (каждую итерацию заново, со всеми методологиями)
+            # Роутинг (каждую итерацию заново, со всеми методичками)
             try:
                 selected_plugins = await self.route_query(query, accumulated_data)
             except Exception as e:
                 print(f"Ошибка маршрутизации: {e}")
                 return "Не удалось определить контекст запроса."
+            # Расширяем плагины на основе кросс-ссылок.
+            # TODO: Только на первой итерации. Возможно это условие убрать
+            if iteration == 0:
+                selected_plugins = self._expand_plugins_with_dependencies(selected_plugins)
             active_tools = [t for t in self.all_tools if t["plugin"] in selected_plugins]
             if not active_tools:
                 return "Не удалось найти подходящие инструменты."
-            # Построение промпта (полные методологии + накопленные данные)
+            # Построение промпта (полные методички + накопленные данные)
             prompt = self._build_stateless_react_prompt(
                 query=query,
                 selected_plugins=selected_plugins,
@@ -1573,7 +1705,7 @@ Final Answer: <текст ответа>
                     proposed_tool, proposed_args = next_step
                     print(f"[ANTI-LOOP] Выполняю вместо первого шага: "
                           f"{proposed_tool} args={proposed_args}")
-                # Маппинги skill→tool, plugin→tool
+                # Маппинги skill в tool, plugin в tool
                 tool = next((t for t in active_tools if t["name"] == proposed_tool), None)
                 if not tool:
                     skill_to_tool = {}
@@ -1699,7 +1831,7 @@ Final Answer: <текст ответа>
 
 **ВИДЖЕТ ТИП Б: МОДЕЛЬНЫЕ ВИДЖЕТЫ (action_card и др.)** — генерируйте полный JSON,
 обёрнутый в ```json ... ```.
-Выполняй требования description этого виджета из скилла. Например:
+Выполняй требования description этого виджета из методички. Например:
 ```json
 {{
   "widget_type": "action_card",

@@ -1,3 +1,15 @@
-meeting_name,project_name,frequency,duration_hours,participants_count,decisions_last_3,roi_score,recommendation,source_system
-Weekly Status,ERP_Migration,Weekly,2,12,2,0.45,Reduce to 1 hour or make async,MS Graph API
-Daily Standup,Mobile_App_Dev,Daily,0.25,8,15,0.90,Keep as is,MS Graph API
+meeting_name,project_id,frequency,frequency_per_week,duration_hours,participants_count,decisions_last_3,roi_score,recommendation,source_system,cost_per_meeting
+Daily Standup,Mobile_App_Dev,Daily,4.8,0.25,8,15,0.92,Keep as is,MS Graph API,10000
+Safety Briefing,Construction_Phase1,Daily,4.5,0.5,15,20,0.95,Keep as is,MS Graph API,37500
+Backlog Refinement,Mobile_App_Dev,~Weekly,1.3,1.5,7,6,0.78,Keep as is,MS Graph API,52500
+Weekly Status,ERP_Migration,Weekly,1.0,2,12,2,0.45,Reduce to 1 hour or make async,MS Graph API,120000
+Tech Sync,ERP_Migration,1-2x/week,1.6,1.5,6,0,0.22,Cancel or make async,MS Graph API,54000
+Architecture Sync,ERP_Migration,~2x/month,0.6,2.5,9,4,0.65,Keep as is,MS Graph API,112500
+Design Review,Mobile_App_Dev,~2x/month,0.7,2,5,1,0.42,Reduce frequency,MS Graph API,50000
+Sprint Planning,Mobile_App_Dev,~Bi-weekly,0.45,4,10,8,0.88,Keep as is,MS Graph API,200000
+Retrospective,Mobile_App_Dev,~Bi-weekly,0.42,1.5,8,5,0.82,Keep as is,MS Graph API,60000
+Risk Review,Construction_Phase1,~Monthly,0.28,3,6,4,0.72,Keep as is,MS Graph API,90000
+Steering Committee,ERP_Migration,~Monthly,0.22,2,8,3,0.58,Keep as is,MS Graph API,80000
+Budget Review,Construction_Phase1,~Monthly,0.18,1.5,5,2,0.48,Consider quarterly,MS Graph API,37500
+All-Hands,All Projects,~6-weekly,0.17,1,50,2,0.28,Reduce to quarterly,MS Graph API,250000
+Executive Update,All Projects,~Quarterly,0.08,1,4,1,0.35,Keep as is,MS Graph API,20000

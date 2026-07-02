@@ -1,92 +1,269 @@
 {
-  "name": "pm-iq",
-  "metadata": {
-    "version": "1.0.0",
-    "description": "The PM IQ plugin collection for project management aligned with PMBOK 8"
-  },
-  "owner": {
-    "name": "My Organization"
-  },
+  "name": "PM IQ Marketplace",
+  "version": "1.0.0",
+  "last_updated": "2026-06-28",
+  "description": "PM IQ Marketplace — реестр плагинов для управления проектами",
   "plugins": [
     {
-      "name": "pm-project-core",
-      "source": "./plugins/pm-project-core",
+      "id": "pm-project-core",
+      "name": "PM Project Core",
+      "source": "plugins/pm-project-core",
       "version": "1.0.0",
-      "description": "Core project artifacts, schedules, WBS, and milestones for predictive, adaptive, and hybrid methodologies.",
+      "description": "Базовый доступ к артефактам проекта, расписанию, этапам и вехам. Поддерживает любые методологии: водопад, гибкие, гибридные.",
+      "author": "PM IQ Team",
+      "industries": ["all"],
+      "methodologies": ["predictive", "adaptive", "hybrid"],
       "skills": [
-        "./plugins/pm-project-core/skills/pm-schedule-tracker",
-        "./plugins/pm-project-core/skills/document-tracker"
-      ]
+        "plugins/pm-project-core/skills/project-identifier",
+        "plugins/pm-project-core/skills/document-tracker",
+        "plugins/pm-project-core/skills/pm-schedule-tracker"
+      ],
+      "skills_details": [
+        {
+          "name": "project-identifier",
+          "description": "Идентифицирует проект по нечёткому запросу пользователя.",
+          "tools": ["identify_project"]
+        },
+        {
+          "name": "document-tracker",
+          "description": "Отслеживает статус утверждения ключевых проектных документов.",
+          "tools": ["get_document_approval_status"]
+        },
+        {
+          "name": "pm-schedule-tracker",
+          "description": "Отслеживает и анализирует календарное расписание проекта, WBS, вехи и критический путь.",
+          "tools": ["get_project_schedule", "get_wbs_structure", "get_milestone_status"]
+        }
+      ],
+      "tools": ["identify_project", "get_document_approval_status", "get_project_schedule", "get_wbs_structure", "get_milestone_status"]
     },
     {
-      "name": "pm-value-and-performance",
-      "source": "./plugins/pm-value-and-performance",
+      "id": "pm-value-and-performance",
+      "name": "PM Value and Performance",
+      "source": "plugins/pm-value-and-performance",
       "version": "1.0.0",
-      "description": "Value delivery, EVM (Earned Value Management), KPIs, and OKR alignment for measuring project performance.",
+      "description": "Value delivery, EVM, KPI и OKR alignment для измерения производительности проекта.",
+      "author": "PM IQ Team",
+      "industries": ["all"],
+      "methodologies": ["predictive", "adaptive", "hybrid"],
       "skills": [
-        "./plugins/pm-value-and-performance/skills/evm-and-value-analyzer",
-        "./plugins/pm-value-and-performance/skills/value-stream-metrics",
-        "./plugins/pm-value-and-performance/skills/okr-progress-tracker"
-      ]
+        "plugins/pm-value-and-performance/skills/evm-and-value-analyzer",
+        "plugins/pm-value-and-performance/skills/value-stream-metrics",
+        "plugins/pm-value-and-performance/skills/okr-progress-tracker"
+      ],
+      "skills_details": [
+        {
+          "name": "evm-and-value-analyzer",
+          "description": "Анализирует финансовое здоровье проекта методом EVM: CPI, SPI, EAC, ETC.",
+          "tools": ["calculate_evm", "get_budget_vs_actual", "analyze_kpi_trends", "get_okr_alignment"]
+        },
+        {
+          "name": "value-stream-metrics",
+          "description": "Анализирует метрики потока (cycle time, throughput) для адаптивных проектов.",
+          "tools": ["analyze_kpi_trends"]
+        },
+        {
+          "name": "okr-progress-tracker",
+          "description": "Отслеживает выравнивание результатов проекта со стратегическими OKR.",
+          "tools": ["get_okr_alignment"]
+        }
+      ],
+      "tools": ["calculate_evm", "get_budget_vs_actual", "analyze_kpi_trends", "get_okr_alignment"]
     },
     {
-      "name": "pm-risk-and-change",
-      "source": "./plugins/pm-risk-and-change",
+      "id": "pm-risk-and-change",
+      "name": "PM Risk and Change",
+      "source": "plugins/pm-risk-and-change",
       "version": "1.0.0",
-      "description": "Formal risk registers, change control (CCB), issue tracking, and contingency reserve management.",
+      "description": "Формальное управление рисками, изменениями (CCB) и проблемами.",
+      "author": "PM IQ Team",
+      "industries": ["construction", "manufacturing", "government"],
+      "methodologies": ["predictive", "hybrid"],
       "skills": [
-        "./plugins/pm-risk-and-change/skills/risk-and-change-controller",
-        "./plugins/pm-risk-and-change/skills/risk-register-query",
-        "./plugins/pm-risk-and-change/skills/change-request-tracker",
-        "./plugins/pm-risk-and-change/skills/issue-escalation"
-      ]
+        "plugins/pm-risk-and-change/skills/risk-register-query",
+        "plugins/pm-risk-and-change/skills/issue-escalation",
+        "plugins/pm-risk-and-change/skills/change-request-tracker",
+        "plugins/pm-risk-and-change/skills/risk-and-change-controller"
+      ],
+      "skills_details": [
+        {
+          "name": "risk-register-query",
+          "description": "Глубокий анализ реестра рисков: приоритизация, EMV, сценарное моделирование.",
+          "tools": ["get_risk_register", "simulate_risk_impact", "calculate_contingency_reserve"]
+        },
+        {
+          "name": "issue-escalation",
+          "description": "Выявляет просроченные проблемы и предлагает пути эскалации.",
+          "tools": ["get_issue_log"]
+        },
+        {
+          "name": "change-request-tracker",
+          "description": "Отслеживает статус запросов на изменение через CCB.",
+          "tools": ["get_change_request_status"]
+        },
+        {
+          "name": "risk-and-change-controller",
+          "description": "Интегрированное управление неопределённостью и изменениями.",
+          "tools": ["get_risk_register", "get_change_request_status", "get_issue_log", "simulate_risk_impact", "calculate_contingency_reserve"]
+        }
+      ],
+      "tools": ["get_risk_register", "simulate_risk_impact", "calculate_contingency_reserve", "get_issue_log", "get_change_request_status"]
     },
     {
-      "name": "pm-resource-and-procurement",
-      "source": "./plugins/pm-resource-and-procurement",
+      "id": "pm-resource-and-procurement",
+      "name": "PM Resource and Procurement",
+      "source": "plugins/pm-resource-and-procurement",
       "version": "1.0.0",
-      "description": "Resource allocation, procurement tracking, contractor performance, and material delivery schedules.",
+      "description": "Управление ресурсами (люди, оборудование, материалы) и закупками.",
+      "author": "PM IQ Team",
+      "industries": ["construction", "manufacturing"],
+      "methodologies": ["predictive", "hybrid"],
       "skills": [
-        "./plugins/pm-resource-and-procurement/skills/resource-and-procurement-tracker",
-        "./plugins/pm-resource-and-procurement/skills/resource-allocation",
-        "./plugins/pm-resource-and-procurement/skills/procurement-tracker",
-        "./plugins/pm-resource-and-procurement/skills/skill-gap-analyzer"
-      ]
+        "plugins/pm-resource-and-procurement/skills/resource-allocation",
+        "plugins/pm-resource-and-procurement/skills/procurement-tracker",
+        "plugins/pm-resource-and-procurement/skills/skill-gap-analyzer",
+        "plugins/pm-resource-and-procurement/skills/resource-and-procurement-tracker"
+      ],
+      "skills_details": [
+        {
+          "name": "resource-allocation",
+          "description": "Анализирует загрузку человеческих ресурсов: перегрузка, конфликты.",
+          "tools": ["get_resource_histogram"]
+        },
+        {
+          "name": "procurement-tracker",
+          "description": "Отслеживает статус заказов на поставку, доставку материалов, KPI подрядчиков.",
+          "tools": ["get_procurement_status", "get_material_delivery_schedule", "get_contractor_performance", "get_equipment_availability"]
+        },
+        {
+          "name": "skill-gap-analyzer",
+          "description": "Сравнивает требуемые навыки с доступными компетенциями команды.",
+          "tools": ["get_skill_gap"]
+        },
+        {
+          "name": "resource-and-procurement-tracker",
+          "description": "Интегрированное управление всеми типами ресурсов и закупками.",
+          "tools": ["get_resource_histogram", "get_procurement_status", "get_contractor_performance", "get_equipment_availability", "get_material_delivery_schedule"]
+        }
+      ],
+      "tools": ["get_resource_histogram", "get_procurement_status", "get_contractor_performance", "get_equipment_availability", "get_material_delivery_schedule", "get_skill_gap"]
     },
     {
-      "name": "pm-quality-and-deliverables",
-      "source": "./plugins/pm-quality-and-deliverables",
+      "id": "pm-quality-and-deliverables",
+      "name": "PM Quality and Deliverables",
+      "source": "plugins/pm-quality-and-deliverables",
       "version": "1.0.0",
-      "description": "Quality management, deliverable acceptance, inspection results, and non-conformance reports (NCR).",
+      "description": "Управление качеством, приемкой результатов, дефектами и NCR.",
+      "author": "PM IQ Team",
+      "industries": ["manufacturing", "construction", "engineering"],
+      "methodologies": ["predictive", "hybrid"],
       "skills": [
-        "./plugins/pm-quality-and-deliverables/skills/quality-and-acceptance-manager",
-        "./plugins/pm-quality-and-deliverables/skills/deliverable-acceptance",
-        "./plugins/pm-quality-and-deliverables/skills/quality-metrics",
-        "./plugins/pm-quality-and-deliverables/skills/inspection-tracker"
-      ]
+        "plugins/pm-quality-and-deliverables/skills/quality-and-acceptance-manager",
+        "plugins/pm-quality-and-deliverables/skills/deliverable-acceptance",
+        "plugins/pm-quality-and-deliverables/skills/quality-metrics",
+        "plugins/pm-quality-and-deliverables/skills/inspection-tracker"
+      ],
+      "skills_details": [
+        {
+          "name": "quality-and-acceptance-manager",
+          "description": "Интегрированное управление качеством и приемкой результатов.",
+          "tools": ["get_deliverable_status", "get_defect_log", "get_inspection_results", "get_ncr_status", "calculate_quality_costs"]
+        },
+        {
+          "name": "deliverable-acceptance",
+          "description": "Отслеживает прохождение результатов через формальные процедуры приемки.",
+          "tools": ["get_deliverable_status"]
+        },
+        {
+          "name": "quality-metrics",
+          "description": "Анализирует показатели качества: дефекты, rework, Cost of Quality.",
+          "tools": ["calculate_quality_costs", "get_defect_log"]
+        },
+        {
+          "name": "inspection-tracker",
+          "description": "Отслеживает результаты инспекций и испытаний (ITP).",
+          "tools": ["get_inspection_results"]
+        }
+      ],
+      "tools": ["get_deliverable_status", "get_defect_log", "get_inspection_results", "get_ncr_status", "calculate_quality_costs"]
     },
     {
-      "name": "pm-agent-toolkit",
-      "source": "./plugins/pm-agent-toolkit",
+      "id": "pm-stakeholder-and-team",
+      "name": "PM Stakeholder and Team",
+      "source": "plugins/pm-stakeholder-and-team",
       "version": "1.0.0",
-      "description": "Toolkit for PMO analysts to build custom declarative agents, dashboard widgets, and tailor PM processes to project complexity.",
+      "description": "Управление стейкхолдерами, коммуникациями и здоровьем команды.",
+      "author": "PM IQ Team",
+      "industries": ["all"],
+      "methodologies": ["predictive", "adaptive", "hybrid"],
       "skills": [
-        "./plugins/pm-agent-toolkit/skills/pm-process-tailoring",
-        "./plugins/pm-agent-toolkit/skills/pm-declarative-agent-developer",
-        "./plugins/pm-agent-toolkit/skills/pm-pc-builder"
-      ]
+        "plugins/pm-stakeholder-and-team/skills/stakeholder-engagement-analyzer",
+        "plugins/pm-stakeholder-and-team/skills/stakeholder-engagement",
+        "plugins/pm-stakeholder-and-team/skills/meeting-effectiveness",
+        "plugins/pm-stakeholder-and-team/skills/team-health-monitor"
+      ],
+      "skills_details": [
+        {
+          "name": "stakeholder-engagement-analyzer",
+          "description": "Интегрированный анализ вовлечённости стейкхолдеров и здоровья команды.",
+          "tools": ["get_stakeholder_register", "analyze_communication_patterns", "get_meeting_decisions", "get_feedback_summary"]
+        },
+        {
+          "name": "stakeholder-engagement",
+          "description": "Анализирует уровень вовлеченности стейкхолдеров.",
+          "tools": ["get_stakeholder_register"]
+        },
+        {
+          "name": "meeting-effectiveness",
+          "description": "Оценивает ROI встреч и предлагает оптимизацию календаря.",
+          "tools": ["get_meeting_decisions"]
+        },
+        {
+          "name": "team-health-monitor",
+          "description": "Отслеживает моральное состояние команды, признаки выгорания.",
+          "tools": ["get_feedback_summary", "analyze_communication_patterns"]
+        }
+      ],
+      "tools": ["get_stakeholder_register", "analyze_communication_patterns", "get_meeting_decisions", "get_feedback_summary"]
     },
     {
-      "name": "pm-stakeholder-and-team",
-      "source": "./plugins/pm-stakeholder-and-team",
+      "id": "pm-agent-toolkit",
+      "name": "PM Agent Toolkit",
+      "source": "plugins/pm-agent-toolkit",
       "version": "1.0.0",
-      "description": "Stakeholder engagement analysis, communication patterns, team health monitoring, and meeting effectiveness.",
+      "description": "Инструментарий для создания кастомных декларативных агентов и адаптации процессов.",
+      "author": "PM IQ Team",
+      "industries": ["all"],
+      "methodologies": ["predictive", "adaptive", "hybrid"],
       "skills": [
-        "./plugins/pm-stakeholder-and-team/skills/stakeholder-engagement-analyzer",
-        "./plugins/pm-stakeholder-and-team/skills/stakeholder-engagement",
-        "./plugins/pm-stakeholder-and-team/skills/meeting-effectiveness",
-        "./plugins/pm-stakeholder-and-team/skills/team-health-monitor"
-      ]
+        "plugins/pm-agent-toolkit/skills/pm-declarative-agent-developer",
+        "plugins/pm-agent-toolkit/skills/pm-process-tailoring",
+        "plugins/pm-agent-toolkit/skills/pm-pc-builder"
+      ],
+      "skills_details": [
+        {
+          "name": "pm-declarative-agent-developer",
+          "description": "Помогает создать JSON-манифест для нового декларативного агента.",
+          "tools": ["scaffold_declarative_agent"]
+        },
+        {
+          "name": "pm-process-tailoring",
+          "description": "Помогает адаптировать процессы управления проектами под сложность проекта.",
+          "tools": ["scaffold_declarative_agent", "assess_project_complexity"]
+        },
+        {
+          "name": "pm-pc-builder",
+          "description": "Генерирует программы (приложения, виджеты) для выполнения специфических задач.",
+          "tools": ["generate_app_schema"]
+        }
+      ],
+      "tools": ["scaffold_declarative_agent", "assess_project_complexity", "generate_app_schema"]
     }
-  ]
+  ],
+  "validation": {
+    "total_plugins": 7,
+    "total_skills": 23,
+    "total_tools": 26,
+    "status": "valid"
+  }
 }
